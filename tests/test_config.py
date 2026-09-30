@@ -57,5 +57,14 @@ def test_embedding_and_linear_use_std_002():
 def test_residual_projections_are_scaled_down_by_depth():
     m = init_weights(_Model(), n_layer=4)
     expected = 0.02 / (2 * 4) ** 0.5
-    assert m.blocks[0].attention.proj.weight.std().item() == pytest.approx(expected, abs=0.002)
-    assert m.blocks[0].feed_forward.down.weight.std().item() == pytest.approx(expected, abs=0.002)
+    # Every block, not just the first. `model.blocks[:1]` passes a
+    # first-block-only assertion while leaving blocks 1-3 at std 0.02 instead of
+    # 0.0071 - a real training-stability regression that a smooth loss curve
+    # would hide, since it is the sum over 4 blocks that only doubles.
+    for block in m.blocks:
+        assert block.attention.proj.weight.std().item() == pytest.approx(
+            expected, abs=0.002
+        )
+        assert block.feed_forward.down.weight.std().item() == pytest.approx(
+            expected, abs=0.002
+        )

@@ -113,6 +113,29 @@ def test_swiglu_shape_gating_and_no_projection_biases():
     assert torch.allclose(ffn(x), torch.zeros(2, 3, 16))
 
 
+def test_swiglu_is_silu_of_gate_times_up_pushed_through_down():
+    """The only value-level check in the model, and the only one that can fail
+    for the arithmetic itself.
+
+    Zeroing each projection in turn is symmetric under swapping `gate` and `up`
+    (both produce an all-zero output) and completely blind to which activation
+    multiplies the gate, so both mutants survive it. Here every weight is
+    hand-set and every input is 1.0, so the product is read straight off:
+
+        p0 = silu(1.0) * 3.0 = 2.1931757      p1 = silu(0.5) * 2.0 = 0.6224593
+        out = 1.0 * p0 - 1.0 * p1 = 1.5707164
+
+    Swapping gate and up gives 1.9769253; silu->gelu gives 1.8325715.
+    """
+    ffn = SwiGLU(1, 2)
+    with torch.no_grad():
+        ffn.gate.weight.copy_(torch.tensor([[1.0], [0.5]]))
+        ffn.up.weight.copy_(torch.tensor([[3.0], [2.0]]))
+        ffn.down.weight.copy_(torch.tensor([[1.0, -1.0]]))
+
+    assert ffn(torch.ones(1, 1, 1)).item() == pytest.approx(1.5707164, abs=1e-6)
+
+
 def _attention(block_size=16, d_model=32, n_head=4):
     torch.manual_seed(0)
     attn = MultiHeadAttention(d_model=d_model, n_head=n_head)

@@ -8,9 +8,14 @@ import mini_transformer
 
 # Derived from the filesystem, not hand-maintained: a hardcoded list is the same
 # hole one level up, since adding a module would leave it silently uncovered.
+# `rglob` reaches subpackages too, so names are built from the path relative to
+# the package root - `sub/bar.py` has to import as `mini_transformer.sub.bar`,
+# not `mini_transformer.bar`.
+PACKAGE_DIR = Path(mini_transformer.__file__).parent
+
 MODULES = sorted(
-    path.stem
-    for path in Path(mini_transformer.__file__).parent.glob("*.py")
+    ".".join(path.relative_to(PACKAGE_DIR).with_suffix("").parts)
+    for path in PACKAGE_DIR.rglob("*.py")
     if path.stem != "__init__"
 )
 
