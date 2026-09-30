@@ -12,6 +12,8 @@ from .init import init_weights
 from .model import MiniTransformer
 from .tokenizer import EOT, decode, encode, load_tokenizer, train_tokenizer
 
+CACHE_KEY = ("dataset", "dataset_config", "corpus_chars", "bpe_vocab_size")
+
 
 def resolve_device(requested):
     if requested != "auto":
@@ -72,21 +74,21 @@ def main(argv=None):
     torch.manual_seed(config.seed)
 
     tokenizer_path = data_dir / "tokenizer.json"
-    if tokenizer_path.exists():
-        tokenizer = load_tokenizer(tokenizer_path)
-    else:
+    train_path = data_dir / "train.bin"
+    stamp_path = data_dir / "config.json"
+
+    stamp = Config.load(stamp_path) if stamp_path.exists() else None
+    stale = stamp is None or _cache_key(stamp) != _cache_key(config)
+    if stale or not tokenizer_path.exists() or not train_path.exists():
         text = load_corpus(config.dataset, config.dataset_config, config.corpus_chars)
         train_tokenizer([text], config.bpe_vocab_size, tokenizer_path)
-        tokenizer = load_tokenizer(tokenizer_path)
+        count = pack_ids(load_tokenizer(tokenizer_path), text, train_path)
+        config.save(stamp_path)
+        print(f"packed {count:,} tokens -> {train_path}")
 
+    tokenizer = load_tokenizer(tokenizer_path)
     vocab_size = tokenizer.get_vocab_size()
     print(f"tokenizer: {vocab_size} tokens (requested {config.bpe_vocab_size})")
-
-    train_path = data_dir / "train.bin"
-    if not train_path.exists():
-        text = load_corpus(config.dataset, config.dataset_config, config.corpus_chars)
-        count = pack_ids(tokenizer, text, train_path)
-        print(f"packed {count:,} tokens -> {train_path}")
 
     data = load_packed(train_path, config.block_size)
 
@@ -102,6 +104,10 @@ def main(argv=None):
         start = state["step"]
         print(f"resumed from step {start}")
 
+    if start >= config.iters:
+        print(f"nothing to do: {out_path} already holds step {start}")
+        return
+
     optimizer = build_optimizer(model, config)
     generator = torch.Generator().manual_seed(config.seed)
 
@@ -109,6 +115,7 @@ def main(argv=None):
     print("iter      elapsed   loss")
 
     started = time.perf_counter()
+    completed = start
 
     for step in range(start, config.iters):
         for group in optimizer.param_groups:
@@ -126,6 +133,7 @@ def main(argv=None):
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), config.grad_clip)
         optimizer.step()
+        completed = step + 1
 
         if step % 100 == 0:
             elapsed = time.perf_counter() - started
@@ -135,8 +143,12 @@ def main(argv=None):
             print(_sample(model, tokenizer, config, device, ""))
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save({"model": model.state_dict(), "step": config.iters, "config": config.__dict__}, out_path)
+    torch.save({"model": model.state_dict(), "step": completed, "config": config.__dict__}, out_path)
     print(f"\nsaved {out_path}")
+
+
+def _cache_key(config):
+    return tuple(getattr(config, field) for field in CACHE_KEY)
 
 
 def _rope(config, device):
