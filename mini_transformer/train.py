@@ -1,98 +1,158 @@
+import argparse
+import math
+import time
+from pathlib import Path
+
 import torch
 import torch.nn.functional as F
 
+from .config import Config
+from .data import get_batch, load_corpus, load_packed, pack_ids
+from .init import init_weights
 from .model import MiniTransformer
-from .vocab import encode, text, vocab_size
+from .tokenizer import EOT, decode, encode, load_tokenizer, train_tokenizer
 
-# --------------------------------------------------
-# 1. Dataset
-# --------------------------------------------------
 
-if __name__ == "__main__":
+def resolve_device(requested):
+    if requested != "auto":
+        return requested
+    return "mps" if torch.backends.mps.is_available() else "cpu"
 
-    torch.manual_seed(42)
 
-    data = torch.tensor(
-        encode(text),
-        dtype=torch.long
+def lr_at(config, step):
+    if step < config.warmup:
+        return config.lr * step / config.warmup
+    progress = (step - config.warmup) / max(config.iters - config.warmup, 1)
+    cosine = 0.5 * (1.0 + math.cos(math.pi * progress))
+    return config.lr * (config.min_lr_ratio + (1 - config.min_lr_ratio) * cosine)
+
+
+def build_optimizer(model, config):
+    decay = [p for p in model.parameters() if p.dim() >= 2]
+    no_decay = [p for p in model.parameters() if p.dim() < 2]
+    return torch.optim.AdamW(
+        [
+            {"params": decay, "weight_decay": config.weight_decay},
+            {"params": no_decay, "weight_decay": 0.0},
+        ],
+        lr=config.lr,
+        betas=(config.beta1, config.beta2),
     )
 
 
-    # Input and target
+def parse_args(argv=None):
+    defaults = Config()
+    p = argparse.ArgumentParser(description="Train the mini transformer")
+    p.add_argument("--dataset", default=defaults.dataset)
+    p.add_argument("--dataset-config", default=defaults.dataset_config)
+    p.add_argument("--corpus-chars", type=int, default=defaults.corpus_chars)
+    p.add_argument("--iters", type=int, default=defaults.iters)
+    p.add_argument("--batch-size", type=int, default=defaults.batch_size)
+    p.add_argument("--lr", type=float, default=defaults.lr)
+    p.add_argument("--device", default="auto")
+    p.add_argument("--data-dir", default="data")
+    p.add_argument("--out", default="checkpoints/model.pt")
+    p.add_argument("--resume", action="store_true")
+    return p.parse_args(argv)
 
-    x = data[:-1]
-    y = data[1:]
 
-
-    # Add batch dimension
-
-    x = x.unsqueeze(0)
-    y = y.unsqueeze(0)
-
-
-    # --------------------------------------------------
-    # 2. Model
-    # --------------------------------------------------
-
-    model = MiniTransformer(
-        vocab_size=vocab_size,
-        d_model=32,
-        num_heads=4,
-        d_ff=128,
-        num_layers=2,
-        max_seq_len=64
+def main(argv=None):
+    args = parse_args(argv)
+    config = Config(
+        dataset=args.dataset,
+        dataset_config=args.dataset_config,
+        corpus_chars=args.corpus_chars,
+        iters=args.iters,
+        batch_size=args.batch_size,
+        lr=args.lr,
     )
 
+    device = resolve_device(args.device)
+    data_dir = Path(args.data_dir)
+    torch.manual_seed(config.seed)
 
-    # --------------------------------------------------
-    # 3. Optimizer
-    # --------------------------------------------------
+    tokenizer_path = data_dir / "tokenizer.json"
+    if tokenizer_path.exists():
+        tokenizer = load_tokenizer(tokenizer_path)
+    else:
+        text = load_corpus(config.dataset, config.dataset_config, config.corpus_chars)
+        train_tokenizer([text], config.bpe_vocab_size, tokenizer_path)
+        tokenizer = load_tokenizer(tokenizer_path)
 
-    optimizer = torch.optim.AdamW(
-        model.parameters(),
-        lr=1e-3
-    )
+    vocab_size = tokenizer.get_vocab_size()
+    print(f"tokenizer: {vocab_size} tokens (requested {config.bpe_vocab_size})")
 
+    train_path = data_dir / "train.bin"
+    if not train_path.exists():
+        text = load_corpus(config.dataset, config.dataset_config, config.corpus_chars)
+        count = pack_ids(tokenizer, text, train_path)
+        print(f"packed {count:,} tokens -> {train_path}")
 
-    # --------------------------------------------------
-    # 4. Training
-    # --------------------------------------------------
+    data = load_packed(train_path, config.block_size)
 
-    for step in range(1000):
+    model = MiniTransformer(vocab_size=vocab_size, config=config)
+    init_weights(model, config.n_layer)
+    model = model.to(device)
 
-        # Forward pass
+    start = 0
+    out_path = Path(args.out)
+    if args.resume and out_path.exists():
+        state = torch.load(out_path, map_location=device, weights_only=True)
+        model.load_state_dict(state["model"])
+        start = state["step"]
+        print(f"resumed from step {start}")
 
-        logits = model(x)
+    optimizer = build_optimizer(model, config)
+    generator = torch.Generator().manual_seed(config.seed)
 
-        # Calculate loss
+    print(f"device={device} params={sum(p.numel() for p in model.parameters()):,}")
+    print("iter      elapsed   loss")
 
+    started = time.perf_counter()
+
+    for step in range(start, config.iters):
+        for group in optimizer.param_groups:
+            group["lr"] = lr_at(config, step)
+
+        x, y = get_batch(
+            data, config.batch_size, config.block_size, device, generator
+        )
+        logits = model(x, *_rope(config, device))
         loss = F.cross_entropy(
-            logits.view(-1, vocab_size),
-            y.view(-1)
+            logits.view(-1, vocab_size), y.view(-1)
         )
 
-        # Clear old gradients
-
         optimizer.zero_grad()
-
-        # Backpropagation
-
         loss.backward()
-
-        # Update parameters
-
+        torch.nn.utils.clip_grad_norm_(model.parameters(), config.grad_clip)
         optimizer.step()
 
         if step % 100 == 0:
+            elapsed = time.perf_counter() - started
+            print(f"{step:>6}  {elapsed:>7.1f}s  {loss.item():>7.3f}", flush=True)
 
-            print(
-                f"step {step:4d} | "
-                f"loss {loss.item():.4f}"
-            )
+        if config.sample_interval and step and step % config.sample_interval == 0:
+            print(_sample(model, tokenizer, config, device, ""))
 
-    torch.save(
-        model.state_dict(),
-        "model.pt"
-    )
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save({"model": model.state_dict(), "step": config.iters, "config": config.__dict__}, out_path)
+    print(f"\nsaved {out_path}")
 
-    print("\nsaved model.pt")
+
+def _rope(config, device):
+    from .rope import rope_cache
+
+    return rope_cache(config.block_size, config.head_dim, device=device)
+
+
+def _sample(model, tokenizer, config, device, prompt):
+    model.eval()
+    ids = encode(tokenizer, prompt) or [tokenizer.token_to_id(EOT)]
+    tokens = torch.tensor([ids], dtype=torch.long, device=device)
+    out = model.generate(tokens, config.block_size, config, temperature=0.8, top_p=0.95)
+    model.train()
+    return decode(tokenizer, out[0].tolist())
+
+
+if __name__ == "__main__":
+    main()
