@@ -63,10 +63,13 @@ jobs:
       # descent assertion is the point: this job exists to catch a run that
       # completes without learning, which is exactly how the bad weight
       # initialisation (loss 182 instead of 9) presented itself.
-      - name: Train 120 steps and assert the loss descends
+      - name: Train 120 steps
         run: |
           set -o pipefail
           uv run python -m mini_transformer.train --iters 120 2>&1 | tee train.log
+
+      - name: Assert the loss descends
+        run: |
           uv run python - <<'PY'
           import re
 
