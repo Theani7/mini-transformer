@@ -3,4 +3,5 @@ __pycache__/
 dist/
 .worktrees/
 .superpowers/
+docs/superpowers/
 data/
