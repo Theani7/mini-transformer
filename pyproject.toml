@@ -1,16 +1,40 @@
 [project]
 name = "mini-transformer"
 version = "0.1.0"
-description = "Add your description here"
+description = "A character-level Transformer implemented from scratch in PyTorch."
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 authors = [
     { name = "theani7", email = "theanilpaneru@gmail.com" }
 ]
 requires-python = ">=3.14"
+keywords = [
+    "transformer",
+    "pytorch",
+    "language-model",
+    "attention",
+    "nlp",
+    "education",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Education",
+]
 dependencies = [
     "numpy>=2.5.3",
     "torch>=2.14.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/Theani7/mini-transformer"
+Repository = "https://github.com/Theani7/mini-transformer"
+Issues = "https://github.com/Theani7/mini-transformer/issues"
 
 [project.scripts]
 mini-transformer = "mini_transformer:main"
