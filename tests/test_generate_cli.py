@@ -142,8 +142,10 @@ def test_a_missing_tokenizer_names_the_path_instead_of_a_traceback(tmp_path):
 def test_the_console_script_reports_a_missing_tokenizer_without_a_traceback(
     tmp_path, monkeypatch
 ):
-    """`mini-transformer` calls `cli`, not `main`, so the `ValueError` -> one-line
-    message conversion has to live in both or the console script dumps a traceback."""
+    """The `mini-transformer` console script calls `cli`, not `main`, so the
+    `ValueError` -> one-line message conversion has to happen somewhere both can reach.
+    It lives in `cli`; `__main__` routes through `cli` too. Without it the console script
+    dumps a traceback, since a console script never executes the package's `__main__`."""
     monkeypatch.setattr(
         sys, "argv", ["mini-transformer", "--tokenizer", str(tmp_path / "nope.json")]
     )

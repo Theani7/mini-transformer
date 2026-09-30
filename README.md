@@ -3,11 +3,12 @@
 A ~3M-parameter decoder-only Transformer language model, written from scratch in
 PyTorch and trained on real text. No `transformers`, no `nn.Transformer` — RMSNorm,
 RoPE, SwiGLU, causal multi-head attention, the BPE tokenizer and nucleus sampling are
-all here, readable, in 734 lines including the CLIs and the per-layer demos.
+all here, readable, in 734 lines including the CLIs.
 
-The point is legibility at a size you can actually watch train. It reaches a final loss
-of **0.090** in **7 minutes 20 seconds** on a laptop, and then reproduces a
-200,000-character slice of WikiText-2 almost verbatim.
+The point is legibility at a size you can actually watch train. It reaches a last-logged
+loss of **0.090** (iteration 5900 of 6000 — the trainer only prints every 100 steps) in
+**7 minutes 20 seconds** on a laptop, and then reproduces a 200,000-character slice of
+WikiText-2 almost verbatim.
 
 ## Quickstart
 
@@ -33,14 +34,16 @@ Requires Python 3.14+. Runtime dependencies are `torch`, `tokenizers`, `datasets
 ## What the recorded run measured
 
 Every number below was measured on one fresh `rm -rf data checkpoints && uv run python
--m mini_transformer.train`, not copied from a design doc. Reproduce it by re-running
-that command; the loss trace will be identical, the wall clock will not.
+-m mini_transformer.train`, not copied from a design doc. Reproduce it by re-running that
+command: the loss trace should match to within floating-point noise (the trainer seeds
+torch and the batch sampler, but MPS kernels do not promise bit-exact results), and the
+wall clock will differ.
 
 | | Measured |
 |---|---|
 | Training loss, last logged (step 5900 of 6000) | **0.090** |
 | Wall clock for the whole run, dataset download included | **440 s (7 m 20 s)** |
-| Teacher-forced next-token accuracy | **98.3 %** (40,244 / 40,960 tokens) |
+| Teacher-forced next-token accuracy (training set, no held-out split) | **98.3 %** (40,244 / 40,960 tokens) |
 | BPE vocabulary | **6,582** tokens (8,192 requested) |
 | Parameters | **3,034,944** |
 | Packed training corpus | **43,656** tokens (200,000 characters of WikiText-2) |
@@ -60,7 +63,9 @@ iter      elapsed   loss
 ```
 
 Verbatim output of `uv run python -m mini_transformer.generate --n 300` (default
-prompt `"The "`, temperature 0.8, top-p 0.95, one long line each):
+prompt `"The "`, temperature 0.8, top-p 0.95, one long line each). This is one run's
+capture: the sampler is not seeded, so re-running gives you different text of similar
+quality, sometimes better.
 
 ```
 The 00 ft / Ikaki m ) long overall and had a long ventral fin fold of arrived in the seven @-@ class battleships , 6 @.@ 4 @-@ inch of heran . Most of the theme wasoser in two above water 45 @-@
@@ -100,8 +105,19 @@ tokens ──▶ token_embedding (tied to lm_head) ──▶ x
                                        RMSNorm ──▶ lm_head (tied) ──▶ logits
 ```
 
-Every layer lives in its own file; `python -m mini_transformer.<layer>` runs it on a
-random tensor, so you can read one piece at a time or just execute it.
+Every layer lives in its own file, and the three that make up the model itself carry a
+`__main__` demo you can run on a random tensor:
+
+```bash
+uv run python -m mini_transformer.transformer_block
+uv run python -m mini_transformer.multi_head_attention
+uv run python -m mini_transformer.model
+```
+
+The other modules are utilities with nothing to demonstrate on a random tensor —
+running `python -m mini_transformer.rmsnorm` just exits silently. For standalone RoPE,
+RMSNorm and SwiGLU demos, use `expirements/03_rope.py`, `04_rmsnorm.py` and
+`05_swiglu.py`, which are runnable on their own and independent of the package.
 
 Parameter arithmetic for `d_model=192`, `d_ff=512`, `n_layer=4`, `vocab=6,582`:
 
@@ -113,10 +129,10 @@ Parameter arithmetic for `d_model=192`, `d_ff=512`, `n_layer=4`, `vocab=6,582`:
 | Final RMSNorm | 192 |
 | **Total** | **3,034,944** |
 
-Note that the widely-quoted 3,344,064 figure for this architecture was measured at a
-*requested* vocabulary of 8,192. This corpus only yields 6,582 merges, and the head is
-sized from the real value, so the shipped model is smaller. `train_tokenizer` prints a
-warning when that happens.
+The design spec quotes 3,344,064 parameters for this architecture, but that figure was
+measured at a *requested* vocabulary of 8,192. This corpus only yields 6,582 merges, and
+the head is sized from the real value, so the shipped model is smaller.
+`train_tokenizer` prints a warning when that happens.
 
 ## Configuration
 
@@ -161,12 +177,15 @@ uv run python -m mini_transformer.generate --temperature 0.0   # greedy
 From Python:
 
 ```python
-model.generate(tokens, max_new_tokens=200)                          # greedy
+model.generate(tokens, max_new_tokens=200)                              # sampled, temperature=1.0
 model.generate(tokens, max_new_tokens=200, temperature=0.8, top_p=0.95)  # nucleus
+model.generate(tokens, max_new_tokens=200, temperature=0.0)             # greedy, deterministic
 ```
 
-`temperature=0.0` short-circuits to `argmax`. Above zero, the top-p tail is dropped and
-the sample is drawn from the renormalised nucleus; `sampling.py` maps the position
+`temperature=0.0` short-circuits to `argmax` and is the only deterministic setting —
+the defaults (`temperature=1.0, top_p=1.0`) sample the full untruncated distribution, so
+two calls with the same tokens give different text. Above zero, the top-p tail is dropped
+and the sample is drawn from the renormalised nucleus; `sampling.py` maps the position
 returned by `torch.multinomial` back to a vocabulary id through the sort permutation,
 which is the step that is easy to omit and hard to spot when it is missing.
 
