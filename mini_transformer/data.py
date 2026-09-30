@@ -22,10 +22,29 @@ def load_corpus(dataset, dataset_config, corpus_chars, insert_eot=False):
     from .tokenizer import EOT
 
     # A bare "wikitext" is not a valid namespace/name; the Hub retries it and the error takes 25 min.
-    splits = load_dataset(dataset, dataset_config)
+    args = (
+        (dataset,)
+        if not dataset_config or dataset_config == "default"
+        else (dataset, dataset_config)
+    )
     delimiter = f" {EOT}\n\n" if insert_eot else "\n\n"
-    rows = (clean_corpus_text(row) for row in splits["train"]["text"] if row.strip())
-    text = delimiter.join(rows)[:corpus_chars]
+
+    try:
+        ds = load_dataset(*args, split="train", streaming=True)
+        rows = []
+        total = 0
+        for item in ds:
+            val = item.get("text") or item.get("story") or ""
+            if val.strip():
+                rows.append(clean_corpus_text(val))
+                total += len(val)
+                if total >= corpus_chars:
+                    break
+        text = delimiter.join(rows)[:corpus_chars]
+    except (TypeError, ValueError, AttributeError, KeyError):
+        splits = load_dataset(*args)
+        rows = (clean_corpus_text(row) for row in splits["train"]["text"] if row.strip())
+        text = delimiter.join(rows)[:corpus_chars]
 
     if not text:
         raise ValueError(
