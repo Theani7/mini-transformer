@@ -1,27 +1,10 @@
 import torch
 
 from .model import MiniTransformer
+from .vocab import decode, encode, vocab_size
 
 
 if __name__ == "__main__":
-
-    text = "hello world"
-
-    chars = sorted(set(text))
-
-    stoi = {ch: i for i, ch in enumerate(chars)}
-    itos = {i: ch for ch, i in stoi.items()}
-
-
-    def encode(text):
-        return [stoi[ch] for ch in text]
-
-
-    def decode(ids):
-        return "".join(itos[i] for i in ids)
-
-
-    vocab_size = len(chars)
 
     model = MiniTransformer(
         vocab_size=vocab_size,

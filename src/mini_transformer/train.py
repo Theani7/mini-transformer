@@ -2,37 +2,12 @@ import torch
 import torch.nn.functional as F
 
 from .model import MiniTransformer
+from .vocab import encode, text, vocab_size
 
 
 # --------------------------------------------------
 # 1. Dataset
 # --------------------------------------------------
-
-text = "hello world"
-
-chars = sorted(set(text))
-
-stoi = {
-    ch: i
-    for i, ch in enumerate(chars)
-}
-
-itos = {
-    i: ch
-    for ch, i in stoi.items()
-}
-
-
-def encode(text):
-    return [stoi[ch] for ch in text]
-
-
-def decode(ids):
-    return "".join(
-        itos[i]
-        for i in ids
-    )
-
 
 data = torch.tensor(
     encode(text),
@@ -55,8 +30,6 @@ y = y.unsqueeze(0)
 # --------------------------------------------------
 # 2. Model
 # --------------------------------------------------
-
-vocab_size = len(chars)
 
 model = MiniTransformer(
     vocab_size=vocab_size,
