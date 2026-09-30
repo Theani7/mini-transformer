@@ -106,3 +106,22 @@ def test_tied_head_means_one_embedding_table():
     model = _model()
     total = sum(p.numel() for p in model.parameters())
     assert total == sum(p.numel() for p in model.token_embedding.parameters()) + 1_771_200
+
+
+def test_generate_stops_early_on_eos_token_id(monkeypatch):
+    """Generating halts immediately once an eos_token_id is emitted rather
+    than continuing unconditionally up to max_new_tokens."""
+    model = _model().eval()
+    tokens = torch.tensor([[1, 2]])
+
+    seq = iter([torch.tensor([[10]]), torch.tensor([[42]]), torch.tensor([[10]])])
+    monkeypatch.setattr("mini_transformer.model.sample_next", lambda *args, **kwargs: next(seq))
+
+    out = model.generate(tokens, max_new_tokens=10, config=CONFIG, eos_token_id=42)
+    assert out.tolist() == [[1, 2, 10, 42]]
+
+    seq2 = iter([torch.tensor([[99]]), torch.tensor([[10]])])
+    monkeypatch.setattr("mini_transformer.model.sample_next", lambda *args, **kwargs: next(seq2))
+    out2 = model.generate(tokens, max_new_tokens=10, config=CONFIG, eos_token_id={99, 100})
+    assert out2.tolist() == [[1, 2, 99]]
+

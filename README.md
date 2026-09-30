@@ -189,7 +189,9 @@ for; every other field changing mid-run is rejected.
 ```bash
 uv run python -m mini_transformer.generate --n 300 --temperature 0.8 --top-p 0.95
 uv run python -m mini_transformer.generate --prompt "The museum " --n 200
-uv run python -m mini_transformer.generate --temperature 0.0   # greedy
+uv run python -m mini_transformer.generate --temperature 0.0     # greedy
+uv run python -m mini_transformer.generate --chat                # multi-turn ChatML conversation
+uv run python -m mini_transformer.generate --stop-on-eot         # stop decode on <|endoftext|>
 ```
 
 From Python:
@@ -198,6 +200,7 @@ From Python:
 model.generate(tokens, max_new_tokens=200)                              # sampled, temperature=1.0
 model.generate(tokens, max_new_tokens=200, temperature=0.8, top_p=0.95)  # nucleus
 model.generate(tokens, max_new_tokens=200, temperature=0.0)             # greedy, deterministic
+model.generate(tokens, max_new_tokens=200, eos_token_id=50256)           # stop early on EOS token
 ```
 
 `temperature=0.0` short-circuits to `argmax` and is the only deterministic setting —

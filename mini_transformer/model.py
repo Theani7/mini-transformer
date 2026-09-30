@@ -66,6 +66,7 @@ class MiniTransformer(nn.Module):
         repetition_penalty=1.0,
         use_cache=False,
         on_token=None,
+        eos_token_id=None,
     ):
         # Measured on the 3.03M model: 1.68 ms/token uncached vs 1.85 cached over
         # 300 tokens on MPS. Decode at this scale is dominated by fixed per-step
@@ -98,6 +99,15 @@ class MiniTransformer(nn.Module):
             window = next_token if use_cache else tokens[:, -config.block_size :]
             if on_token is not None:
                 on_token(next_token)
+
+            if eos_token_id is not None:
+                token_val = next_token.item() if next_token.numel() == 1 else None
+                if token_val is not None:
+                    if isinstance(eos_token_id, (set, list, tuple)):
+                        if token_val in eos_token_id:
+                            break
+                    elif token_val == eos_token_id:
+                        break
 
         return tokens
 

@@ -6,7 +6,14 @@ import torch
 
 from .config import resolve_checkpoint_config
 from .model import MiniTransformer
-from .tokenizer import EOT, decode, encode, load_tokenizer
+from .tokenizer import (
+    EOT,
+    IM_END,
+    decode,
+    encode,
+    format_chat,
+    load_tokenizer,
+)
 from .train import resolve_device
 
 
@@ -156,6 +163,18 @@ def main(argv=None):
         default=False,
         help="run in an interactive prompt loop",
     )
+    p.add_argument(
+        "--chat",
+        action="store_true",
+        default=False,
+        help="run in multi-turn ChatML conversational mode",
+    )
+    p.add_argument(
+        "--stop-on-eot",
+        action="store_true",
+        default=False,
+        help="stop generation when EOT token is emitted",
+    )
     args = p.parse_args(argv)
 
     device = resolve_device(args.device)
@@ -169,6 +188,18 @@ def main(argv=None):
     vocab_size = tokenizer.get_vocab_size()
 
     model, config = load_checkpoint(args.checkpoint, device, vocab_size)
+
+    eot_id = tokenizer.token_to_id(EOT)
+    im_end_id = tokenizer.token_to_id(IM_END)
+    stop_ids = set()
+    if args.stop_on_eot and eot_id is not None:
+        stop_ids.add(eot_id)
+    if args.chat:
+        if eot_id is not None:
+            stop_ids.add(eot_id)
+        if im_end_id is not None:
+            stop_ids.add(im_end_id)
+    eos_token_id = stop_ids if stop_ids else None
 
     def generate_single_prompt(prompt_text, stream=args.stream):
         ids = encode(tokenizer, prompt_text)
@@ -205,6 +236,7 @@ def main(argv=None):
                 repetition_penalty=args.repetition_penalty,
                 use_cache=args.use_cache,
                 on_token=stream_token,
+                eos_token_id=eos_token_id,
             )
             print()
         else:
@@ -217,10 +249,50 @@ def main(argv=None):
                 top_k=args.top_k,
                 repetition_penalty=args.repetition_penalty,
                 use_cache=args.use_cache,
+                eos_token_id=eos_token_id,
             )
             print(decode(tokenizer, out[0].tolist()))
 
-    if args.interactive:
+    if args.chat:
+        print("MiniTransformer ChatML mode (Ctrl+C or 'exit' to quit)\n")
+        history = []
+        while True:
+            try:
+                user_prompt = input("User: ")
+            except (EOFError, KeyboardInterrupt):
+                print()
+                break
+            if user_prompt.strip() in {"exit", "quit"}:
+                break
+            history.append({"role": "user", "content": user_prompt})
+            prompt_chat = format_chat(history, add_generation_prompt=True)
+            print("Assistant: ", end="", flush=True)
+
+            accumulated = []
+
+            def stream_chat_token(token_tensor, acc=accumulated):
+                tok_id = token_tensor[0, 0].item()
+                if tok_id not in (eot_id, im_end_id):
+                    print(decode(tokenizer, [tok_id]), end="", flush=True)
+                    acc.append(tok_id)
+
+            ids = encode(tokenizer, prompt_chat)
+            tokens = torch.tensor([ids], dtype=torch.long, device=device)
+            model.generate(
+                tokens,
+                max_new_tokens=args.n,
+                config=config,
+                temperature=args.temperature,
+                top_p=args.top_p,
+                top_k=args.top_k,
+                repetition_penalty=args.repetition_penalty,
+                use_cache=args.use_cache,
+                on_token=stream_chat_token,
+                eos_token_id=eos_token_id,
+            )
+            print()
+            history.append({"role": "assistant", "content": decode(tokenizer, accumulated)})
+    elif args.interactive:
         print("MiniTransformer interactive mode (Ctrl+C or 'exit' to quit)\n")
         while True:
             try:

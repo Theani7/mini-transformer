@@ -426,3 +426,25 @@ def test_interactive_mode_runs_prompts_and_exits(tmp_path, monkeypatch, capsys):
 
     out = capsys.readouterr().out
     assert "interactive mode" in out
+
+
+def test_stop_on_eot_flag_passes_eos_token_id_to_generate(tmp_path, monkeypatch):
+    seen = _spy_generate(monkeypatch)
+    cli_args = _cli(tmp_path)
+
+    main([*cli_args, "--prompt", "the ", "--n", "1", "--stop-on-eot"])
+
+    eot_id = load_tokenizer(tmp_path / "tokenizer.json").token_to_id(EOT)
+    assert seen["eos_token_id"] == {eot_id}
+
+
+def test_chat_mode_runs_conversation_turn(tmp_path, monkeypatch, capsys):
+    inputs = iter(["hello", "exit"])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
+
+    main([*_cli(tmp_path), "--chat", "--n", "1"])
+
+    out = capsys.readouterr().out
+    assert "ChatML mode" in out
+    assert "Assistant: " in out
+
