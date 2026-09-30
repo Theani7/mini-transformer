@@ -1,4 +1,5 @@
 import argparse
+import json
 import math
 import time
 from pathlib import Path
@@ -6,6 +7,7 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.nn.functional as F
+from safetensors.torch import save_model
 
 from .config import Config, resolve_checkpoint_config
 from .data import get_batch, load_corpus, load_packed, pack_ids, split_ids
@@ -320,6 +322,15 @@ def main(argv=None):
                     },
                     best_path,
                 )
+                save_model(
+                    model,
+                    best_path.with_suffix(".safetensors"),
+                    metadata={
+                        "config": json.dumps(config.__dict__),
+                        "step": str(completed),
+                        "val_loss": str(best_val),
+                    },
+                )
             else:
                 patience_counter += 1
                 if (
@@ -349,6 +360,15 @@ def main(argv=None):
             },
             best_path,
         )
+        save_model(
+            model,
+            best_path.with_suffix(".safetensors"),
+            metadata={
+                "config": json.dumps(config.__dict__),
+                "step": str(completed),
+                "val_loss": str(best_val),
+            },
+        )
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save(
@@ -363,7 +383,13 @@ def main(argv=None):
         },
         out_path,
     )
-    print(f"\nsaved {out_path}")
+    safetensors_path = out_path.with_suffix(".safetensors")
+    save_model(
+        model,
+        safetensors_path,
+        metadata={"config": json.dumps(config.__dict__), "step": str(completed)},
+    )
+    print(f"\nsaved {out_path} and {safetensors_path}")
 
     if best_val is not None:
         source = "best" if config.eval_interval else "best (from the resumed run)"

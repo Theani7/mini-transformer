@@ -31,6 +31,27 @@ def test_roundtrips_a_checkpoint(tmp_path):
     assert loaded.lm_head.weight.shape == (64, config.d_model)
 
 
+def test_roundtrips_a_safetensors_checkpoint(tmp_path):
+    import json
+
+    from safetensors.torch import save_model
+
+    from mini_transformer.init import init_weights
+    from mini_transformer.model import MiniTransformer
+
+    config = Config()
+    model = MiniTransformer(vocab_size=64, config=config)
+    init_weights(model, config.n_layer)
+
+    path = tmp_path / "model.safetensors"
+    save_model(model, path, metadata={"config": json.dumps(config.__dict__), "step": "10"})
+
+    loaded, loaded_config = load_checkpoint(path, "cpu", vocab_size=64)
+    assert loaded_config == config
+    assert loaded.lm_head.weight.shape == (64, config.d_model)
+    assert loaded.lm_head.weight is loaded.token_embedding.weight
+
+
 def test_the_mismatch_is_named_with_both_values_before_the_model_is_built(tmp_path):
     """`Config(d_model=256)` also trips the attention divisibility check, so a
     diff that runs after `MiniTransformer(...)` reports `d_model 256 is not

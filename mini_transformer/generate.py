@@ -19,6 +19,49 @@ def load_checkpoint(path, device, vocab_size, config=None):
             f"{path} not found - run: uv run python -m mini_transformer.train"
         )
 
+    if path.suffix == ".safetensors":
+        import json
+
+        from safetensors import safe_open
+        from safetensors.torch import load_model
+
+        try:
+            with safe_open(path, framework="pt", device=device) as f:
+                meta = f.metadata() or {}
+                keys = set(f.keys())
+                if "token_embedding.weight" not in keys and "lm_head.weight" not in keys:
+                    raise ValueError(
+                        f"{path} is not a mini-transformer checkpoint (no 'model' entry with a "
+                        f"token embedding) - point --checkpoint at a file written by "
+                        f"mini_transformer.train"
+                    )
+                key = "token_embedding.weight" if "token_embedding.weight" in keys else "lm_head.weight"
+                saved_vocab = f.get_slice(key).get_shape()[0]
+        except ValueError:
+            raise
+        except Exception as exc:
+            raise ValueError(f"{path} could not be read as safetensors: {exc}") from exc
+
+        raw_config = json.loads(meta["config"]) if "config" in meta else None
+        config = resolve_checkpoint_config(raw_config, config, path)
+
+        if saved_vocab != vocab_size:
+            raise ValueError(
+                f"checkpoint was trained on a {saved_vocab}-token vocabulary but "
+                f"{vocab_size} tokens were requested - point --tokenizer at the "
+                f"tokenizer used for training, or retrain the model"
+            )
+
+        model = MiniTransformer(vocab_size=vocab_size, config=config)
+        try:
+            load_model(model, path, device=device)
+        except Exception as exc:
+            raise ValueError(
+                f"checkpoint weights do not fit the requested config: {exc}"
+            ) from exc
+
+        return model.to(device).eval(), config
+
     state = torch.load(path, map_location=device, weights_only=True)
 
     # Before the weight and vocabulary checks below, and before the model is

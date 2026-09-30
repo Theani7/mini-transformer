@@ -333,7 +333,7 @@ installed.
 ## Development
 
 ```bash
-uv run pytest -q           # 121 tests
+uv run pytest -q           # 123 tests
 uv run ruff check .
 uv build                   # wheel + sdist
 ```

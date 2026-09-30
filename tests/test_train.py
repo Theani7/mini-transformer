@@ -407,3 +407,17 @@ def test_early_stopping_halts_training_when_patience_exceeded(monkeypatch, tmp_p
     assert "early stopping" in out
     state = torch.load(tmp_path / "m.pt", weights_only=True)
     assert state["step"] < 20
+
+
+def test_train_writes_safetensors_checkpoint(monkeypatch, tmp_path):
+    """Training emits both .pt and .safetensors checkpoints alongside each other."""
+    from safetensors import safe_open
+
+    _run(monkeypatch, tmp_path, ["--iters", "2", "--device", "cpu"])
+
+    safetensors_path = tmp_path / "m.safetensors"
+    assert safetensors_path.exists()
+    with safe_open(safetensors_path, framework="pt") as f:
+        meta = f.metadata() or {}
+        assert "config" in meta
+        assert "step" in meta
