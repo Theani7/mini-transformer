@@ -15,8 +15,8 @@ class TransformerBlock(nn.Module):
         self.norm2 = RMSNorm(d_model)
         self.feed_forward = SwiGLU(d_model=d_model, d_ff=d_ff)
 
-    def forward(self, x, cos, sin):
-        x = x + self.attention(self.norm1(x), cos, sin)
+    def forward(self, x, cos, sin, cache=None):
+        x = x + self.attention(self.norm1(x), cos, sin, cache)
         x = x + self.feed_forward(self.norm2(x))
         return x
 

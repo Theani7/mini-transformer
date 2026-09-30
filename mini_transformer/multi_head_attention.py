@@ -20,7 +20,7 @@ class MultiHeadAttention(nn.Module):
         self.qkv = nn.Linear(d_model, 3 * d_model, bias=False)
         self.proj = nn.Linear(d_model, d_model, bias=False)
 
-    def forward(self, x, cos, sin):
+    def forward(self, x, cos, sin, cache=None):
         batch_size, seq_len, d_model = x.shape
 
         q, k, v = self.qkv(x).split(d_model, dim=2)
@@ -32,7 +32,16 @@ class MultiHeadAttention(nn.Module):
         q = apply_rope(q, cos[:, :, :seq_len], sin[:, :, :seq_len])
         k = apply_rope(k, cos[:, :, :seq_len], sin[:, :, :seq_len])
 
-        out = F.scaled_dot_product_attention(q, k, v, is_causal=True)
+        if cache is not None:
+            past_k, past_v = cache.get("k"), cache.get("v")
+            if past_k is not None:
+                k = torch.cat([past_k, k], dim=2)
+                v = torch.cat([past_v, v], dim=2)
+            cache["k"], cache["v"] = k, v
+
+        # is_causal aligns top-left, so with q_len=1 and k_len=N it would hide
+        # every cached key but the first. A single decode query may see them all.
+        out = F.scaled_dot_product_attention(q, k, v, is_causal=seq_len > 1)
 
         out = out.transpose(1, 2).contiguous().view(batch_size, seq_len, d_model)
 

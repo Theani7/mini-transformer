@@ -238,12 +238,15 @@ Also worth knowing before you read generated output:
 
 ## Known ceilings
 
-- **No KV cache.** `generate()` re-runs the entire window on every step, so decoding is
-  **O(n²)** in sequence length: `n` new tokens cost `n` full-window forwards rather than
-  `n` single-token forwards. Deliberate at this scale, where the whole context is 128
-  tokens. The upgrade path is a per-layer cache of `k` and `v` with one row appended per
-  step; the attention call already takes `cos`/`sin` per position, so the change is
-  confined to `multi_head_attention.py` and the loop in `model.generate`.
+- **The KV cache exists but is off by default.** `generate(..., use_cache=True)` keeps a
+  per-layer `k`/`v` and appends one row per step, so decoding is O(n) rather than O(n²).
+  Measured on the 3.03M model over 300 tokens on MPS: **1.68 ms/token without, 1.85 ms
+  with** — a wash. At this scale decode is dominated by fixed per-step overhead (kernel
+  launches, the sampler), not by the arithmetic the cache eliminates, and the cache adds
+  two `torch.cat` allocations per layer. It is the right architecture and pays off once
+  decode is compute-bound: a larger model, or CUDA with graph capture, where per-step
+  launch cost stops dominating. `use_cache=True` and `use_cache=False` produce
+  **byte-identical** tokens, which is what makes the comparison honest.
 - **Single-sequence decode.** `generate()` handles one prompt at a time.
 - **No train/validation split** and no checkpoint selection: the last step is the
   deliverable. Use `--resume` to extend a run, which is how you would get a validation
