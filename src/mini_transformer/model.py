@@ -1,39 +1,7 @@
 import torch
 import torch.nn as nn
 
-from .multi_head_attention import MultiHeadAttention
-from .feed_forward import FeedForward
-
-
-class TransformerBlock(nn.Module):
-
-    def __init__(self, d_model, num_heads, d_ff):
-        super().__init__()
-
-        self.norm1 = nn.LayerNorm(d_model)
-        self.norm2 = nn.LayerNorm(d_model)
-
-        self.attention = MultiHeadAttention(
-            d_model=d_model,
-            num_heads=num_heads
-        )
-
-        self.feed_forward = FeedForward(
-            d_model=d_model,
-            d_ff=d_ff
-        )
-
-    def forward(self, x):
-
-        x = x + self.attention(
-            self.norm1(x)
-        )
-
-        x = x + self.feed_forward(
-            self.norm2(x)
-        )
-
-        return x
+from .transformer_block import TransformerBlock
 
 
 class MiniTransformer(nn.Module):
