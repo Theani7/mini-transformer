@@ -3,7 +3,7 @@ import torch
 
 from mini_transformer.config import Config
 from mini_transformer.generate import load_checkpoint, main
-from mini_transformer.tokenizer import EOT
+from mini_transformer.tokenizer import EOT, encode, load_tokenizer
 
 TEXT = "the quick brown fox jumps over the lazy dog. " * 200
 
@@ -27,21 +27,6 @@ def test_roundtrips_a_checkpoint(tmp_path):
     loaded, loaded_config = load_checkpoint(path, "cpu", vocab_size=64)
     assert loaded_config == config
     assert loaded.lm_head.weight.shape == (64, config.d_model)
-
-
-def test_mismatched_config_is_explained(tmp_path):
-    from mini_transformer.init import init_weights
-    from mini_transformer.model import MiniTransformer
-
-    config = Config()
-    model = MiniTransformer(vocab_size=64, config=config)
-    init_weights(model, config.n_layer)
-    path = tmp_path / "model.pt"
-    torch.save({"model": model.state_dict(), "step": 1, "config": config.__dict__}, path)
-
-    other = Config(d_model=256)
-    with pytest.raises(ValueError, match="d_model"):
-        load_checkpoint(path, "cpu", vocab_size=64, config=other)
 
 
 def test_the_mismatch_is_named_with_both_values_before_the_model_is_built(tmp_path):
@@ -74,8 +59,28 @@ def test_weights_that_do_not_fit_the_tokenizer_are_reported(tmp_path):
     path = tmp_path / "model.pt"
     torch.save({"model": model.state_dict(), "step": 1, "config": config.__dict__}, path)
 
-    with pytest.raises(ValueError, match="do not fit"):
+    with pytest.raises(ValueError) as excinfo:
         load_checkpoint(path, "cpu", vocab_size=128)
+
+    message = str(excinfo.value)
+    assert "trained on a 64-token vocabulary" in message
+    assert "128 tokens were requested" in message
+    assert "--tokenizer" in message
+    assert "requested config" not in message
+
+
+def test_a_missing_tokenizer_names_the_path_instead_of_a_traceback(tmp_path):
+    with pytest.raises(ValueError, match="tokenizer.json not found - run:"):
+        main(
+            [
+                "--checkpoint",
+                str(tmp_path / "model.pt"),
+                "--tokenizer",
+                str(tmp_path / "tokenizer.json"),
+                "--device",
+                "cpu",
+            ]
+        )
 
 
 def _cli(tmp_path):
@@ -104,6 +109,30 @@ def _cli(tmp_path):
     ]
 
 
+def _prompt_of_token_length(tmp_path, n):
+    tokenizer = load_tokenizer(tmp_path / "tokenizer.json")
+    built = ""
+    for char in TEXT:
+        built += char
+        if len(encode(tokenizer, built)) == n:
+            return built
+    raise AssertionError(f"no prefix of TEXT encodes to exactly {n} tokens")
+
+
+def _spy_generate(monkeypatch):
+    from mini_transformer.model import MiniTransformer
+
+    seen = {}
+
+    def spy(self, tokens, **kwargs):
+        seen["tokens"] = tokens
+        seen.update(kwargs)
+        return tokens
+
+    monkeypatch.setattr(MiniTransformer, "generate", spy)
+    return seen
+
+
 @pytest.mark.parametrize("prompt", ["", "   "])
 def test_blank_prompt_is_seeded_with_eot_instead_of_crashing(tmp_path, capsys, prompt):
     main([*_cli(tmp_path), "--prompt", prompt, "--n", "1"])
@@ -113,10 +142,50 @@ def test_blank_prompt_is_seeded_with_eot_instead_of_crashing(tmp_path, capsys, p
     assert EOT in err
 
 
-def test_prompt_longer_than_the_block_says_it_was_truncated(tmp_path, capsys):
-    main([*_cli(tmp_path), "--prompt", TEXT, "--n", "1"])
+@pytest.mark.parametrize("tokens", [16, 17])
+def test_the_truncation_warning_fires_only_past_the_block(tmp_path, capsys, tokens):
+    main(
+        [*_cli(tmp_path), "--prompt", _prompt_of_token_length(tmp_path, tokens), "--n", "1"]
+    )
 
-    assert "only the last 16" in capsys.readouterr().err
+    warned = "only the last 16" in capsys.readouterr().err
+    assert warned is (tokens > 16)
+
+
+def test_the_flags_and_the_seed_reach_generate(tmp_path, monkeypatch):
+    seen = _spy_generate(monkeypatch)
+
+    main(
+        [
+            *_cli(tmp_path),
+            "--prompt",
+            "",
+            "--n",
+            "7",
+            "--temperature",
+            "0.3",
+            "--top-p",
+            "0.5",
+        ]
+    )
+
+    assert seen["temperature"] == 0.3
+    assert seen["top_p"] == 0.5
+    assert seen["max_new_tokens"] == 7
+    assert seen["tokens"][0].tolist() == [
+        load_tokenizer(tmp_path / "tokenizer.json").token_to_id(EOT)
+    ]
+
+
+@pytest.mark.skipif(
+    not torch.backends.mps.is_available(), reason="CPU is the torch default device"
+)
+def test_the_prompt_tensor_is_built_on_the_resolved_device(tmp_path, monkeypatch):
+    seen = _spy_generate(monkeypatch)
+
+    main([*_cli(tmp_path), "--device", "mps", "--prompt", "the ", "--n", "1"])
+
+    assert seen["tokens"].device.type == "mps"
 
 
 def test_the_effective_sampling_settings_are_printed(tmp_path, capsys):

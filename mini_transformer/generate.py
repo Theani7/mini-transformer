@@ -7,9 +7,12 @@ import torch
 from .config import Config
 from .model import MiniTransformer
 from .tokenizer import EOT, decode, encode, load_tokenizer
+from .train import resolve_device
 
 
 def load_checkpoint(path, device, vocab_size, config=None):
+    """`config` is for callers holding an independent config to check against
+    the checkpoint's; the CLI omits it, so the checkpoint's own config wins."""
     path = Path(path)
     if not path.exists():
         raise ValueError(
@@ -26,7 +29,7 @@ def load_checkpoint(path, device, vocab_size, config=None):
         differing = {
             key: (saved[key], getattr(config, key))
             for key in saved
-            if key in config.__dict__ and saved[key] != getattr(config, key)
+            if saved[key] != getattr(config, key)
         }
         if differing:
             named = ", ".join(
@@ -34,6 +37,14 @@ def load_checkpoint(path, device, vocab_size, config=None):
                 for k, (old, new) in sorted(differing.items())
             )
             raise ValueError(f"checkpoint config differs: {named}")
+
+    saved_vocab = state["model"]["token_embedding.weight"].shape[0]
+    if saved_vocab != vocab_size:
+        raise ValueError(
+            f"checkpoint was trained on a {saved_vocab}-token vocabulary but "
+            f"{vocab_size} tokens were requested - point --tokenizer at the "
+            f"tokenizer used for training, or retrain the model"
+        )
 
     model = MiniTransformer(vocab_size=vocab_size, config=config)
 
@@ -68,9 +79,13 @@ def main(argv=None):
     p.add_argument("--device", default="auto")
     args = p.parse_args(argv)
 
-    from .train import resolve_device
-
     device = resolve_device(args.device)
+
+    if not Path(args.tokenizer).exists():
+        raise ValueError(
+            f"{args.tokenizer} not found - run: uv run python -m mini_transformer.train"
+        )
+
     tokenizer = load_tokenizer(args.tokenizer)
     vocab_size = tokenizer.get_vocab_size()
 
