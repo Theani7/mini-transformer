@@ -44,6 +44,10 @@ wall clock will differ.
 | Packed training corpus | **43,656** tokens (200,000 characters of WikiText-2) |
 | Device | Apple MPS |
 
+<p align="center">
+  <img src="assets/loss_curve.svg" alt="Training Loss and Accuracy Curve" width="100%">
+</p>
+
 Loss is logged every 100 steps. This is a sampled subset of that trace, not every row —
 chosen to include two of the steps where it rises rather than falls, because a table
 sampled only at round thousands looks monotone and hides that:
@@ -297,6 +301,24 @@ Notes worth knowing before you trust the number:
   rather than silently truncating ids.
 
 ## Layout
+
+```mermaid
+flowchart LR
+    Tokens["Input Token IDs"] --> Embed["Token Embedding (tied)"]
+    Embed --> B0["Block 0"]
+    B0 --> B1["Block 1"]
+    B1 --> B2["Block 2"]
+    B2 --> B3["Block 3"]
+    subgraph Block ["Each Transformer Block"]
+        direction TB
+        Norm1["RMSNorm"] --> Attn["Causal Multi-Head Attention + RoPE"]
+        Attn --> Norm2["RMSNorm"]
+        Norm2 --> FFN["SwiGLU Feed-Forward"]
+    end
+    B3 --> FinalNorm["RMSNorm"]
+    FinalNorm --> Head["LM Head (tied to Embedding)"]
+    Head --> Logits["Logits / Next Token"]
+```
 
 ```
 mini_transformer/

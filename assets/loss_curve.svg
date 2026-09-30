@@ -1,0 +1,91 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 840 400" width="100%" height="100%">
+  <defs>
+    <linearGradient id="lossGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#58a6ff" stop-opacity="0.35"/>
+      <stop offset="100%" stop-color="#58a6ff" stop-opacity="0.0"/>
+    </linearGradient>
+    <linearGradient id="accGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#3fb950" stop-opacity="0.25"/>
+      <stop offset="100%" stop-color="#3fb950" stop-opacity="0.0"/>
+    </linearGradient>
+  </defs>
+  <rect width="840" height="400" rx="12" fill="#0d1117" stroke="#30363d" stroke-width="1.5"/>
+
+  <!-- Title & Legend -->
+  <text x="70" y="36" fill="#f0f6fc" font-family="system-ui, -apple-system, sans-serif" font-size="16" font-weight="600">Training Loss &amp; Next-Token Accuracy (3M Mini-Transformer)</text>
+  <circle cx="600" cy="30" r="5" fill="#58a6ff"/>
+  <text x="612" y="34" fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="12">Training Loss</text>
+  <circle cx="710" cy="30" r="5" fill="#3fb950"/>
+  <text x="722" y="34" fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="12">Accuracy (%)</text>
+
+  <!-- Horizontal Grid & Y-Axes -->
+
+  <line x1="70" y1="340.0" x2="770" y2="340.0" stroke="#21262d" stroke-dasharray="3 3"/>
+  <text x="58" y="344.0" fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="11" text-anchor="end">0.0</text>
+  <text x="782" y="344.0" fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="11" text-anchor="start">0%</text>
+  <line x1="70" y1="284.0" x2="770" y2="284.0" stroke="#21262d" stroke-dasharray="3 3"/>
+  <text x="58" y="288.0" fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="11" text-anchor="end">2.0</text>
+  <text x="782" y="288.0" fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="11" text-anchor="start">20%</text>
+  <line x1="70" y1="228.0" x2="770" y2="228.0" stroke="#21262d" stroke-dasharray="3 3"/>
+  <text x="58" y="232.0" fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="11" text-anchor="end">4.0</text>
+  <text x="782" y="232.0" fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="11" text-anchor="start">40%</text>
+  <line x1="70" y1="172.0" x2="770" y2="172.0" stroke="#21262d" stroke-dasharray="3 3"/>
+  <text x="58" y="176.0" fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="11" text-anchor="end">6.0</text>
+  <text x="782" y="176.0" fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="11" text-anchor="start">60%</text>
+  <line x1="70" y1="116.0" x2="770" y2="116.0" stroke="#21262d" stroke-dasharray="3 3"/>
+  <text x="58" y="120.0" fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="11" text-anchor="end">8.0</text>
+  <text x="782" y="120.0" fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="11" text-anchor="start">80%</text>
+  <line x1="70" y1="60.0" x2="770" y2="60.0" stroke="#21262d" stroke-dasharray="3 3"/>
+  <text x="58" y="64.0" fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="11" text-anchor="end">10.0</text>
+  <text x="782" y="64.0" fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="11" text-anchor="start">100%</text>
+  <line x1="70.0" y1="340" x2="70.0" y2="346" stroke="#8b949e"/>
+  <text x="70.0" y="362" fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="11" text-anchor="middle">0</text>
+  <line x1="186.7" y1="340" x2="186.7" y2="346" stroke="#8b949e"/>
+  <text x="186.7" y="362" fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="11" text-anchor="middle">1000</text>
+  <line x1="303.3" y1="340" x2="303.3" y2="346" stroke="#8b949e"/>
+  <text x="303.3" y="362" fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="11" text-anchor="middle">2000</text>
+  <line x1="420.0" y1="340" x2="420.0" y2="346" stroke="#8b949e"/>
+  <text x="420.0" y="362" fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="11" text-anchor="middle">3000</text>
+  <line x1="536.7" y1="340" x2="536.7" y2="346" stroke="#8b949e"/>
+  <text x="536.7" y="362" fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="11" text-anchor="middle">4000</text>
+  <line x1="653.3" y1="340" x2="653.3" y2="346" stroke="#8b949e"/>
+  <text x="653.3" y="362" fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="11" text-anchor="middle">5000</text>
+  <line x1="770.0" y1="340" x2="770.0" y2="346" stroke="#8b949e"/>
+  <text x="770.0" y="362" fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="11" text-anchor="middle">6000</text>
+  <text x="420.0" y="385" fill="#8b949e" font-family="system-ui, -apple-system, sans-serif" font-size="12" text-anchor="middle">Training Iterations (steps)</text>
+  <polygon points="70,340 70.0,93.5 81.7,158.2 128.3,250.4 186.7,295.7 221.7,311.0 233.3,296.1 303.3,321.2 396.7,332.6 408.3,331.5 420.0,333.1 536.7,336.6 653.3,336.8 758.3,337.5 770.0,337.5 770,340" fill="url(#lossGrad)"/>
+  <polyline points="70.0,308.6 81.7,271.4 128.3,192.2 186.7,131.1 221.7,110.1 233.3,120.5 303.3,90.2 396.7,74.8 408.3,77.1 420.0,73.2 536.7,67.3 653.3,65.9 758.3,64.8 770.0,64.5" fill="none" stroke="#3fb950" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <polyline points="70.0,93.5 81.7,158.2 128.3,250.4 186.7,295.7 221.7,311.0 233.3,296.1 303.3,321.2 396.7,332.6 408.3,331.5 420.0,333.1 536.7,336.6 653.3,336.8 758.3,337.5 770.0,337.5" fill="none" stroke="#58a6ff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="70.0" cy="93.5" r="3.5" fill="#58a6ff" stroke="#0d1117" stroke-width="1.5"/>
+  <circle cx="70.0" cy="308.6" r="3.5" fill="#3fb950" stroke="#0d1117" stroke-width="1.5"/>
+  <circle cx="81.7" cy="158.2" r="3.5" fill="#58a6ff" stroke="#0d1117" stroke-width="1.5"/>
+  <circle cx="81.7" cy="271.4" r="3.5" fill="#3fb950" stroke="#0d1117" stroke-width="1.5"/>
+  <circle cx="128.3" cy="250.4" r="3.5" fill="#58a6ff" stroke="#0d1117" stroke-width="1.5"/>
+  <circle cx="128.3" cy="192.2" r="3.5" fill="#3fb950" stroke="#0d1117" stroke-width="1.5"/>
+  <circle cx="186.7" cy="295.7" r="3.5" fill="#58a6ff" stroke="#0d1117" stroke-width="1.5"/>
+  <circle cx="186.7" cy="131.1" r="3.5" fill="#3fb950" stroke="#0d1117" stroke-width="1.5"/>
+  <circle cx="221.7" cy="311.0" r="3.5" fill="#58a6ff" stroke="#0d1117" stroke-width="1.5"/>
+  <circle cx="221.7" cy="110.1" r="3.5" fill="#3fb950" stroke="#0d1117" stroke-width="1.5"/>
+  <circle cx="233.3" cy="296.1" r="3.5" fill="#58a6ff" stroke="#0d1117" stroke-width="1.5"/>
+  <circle cx="233.3" cy="120.5" r="3.5" fill="#3fb950" stroke="#0d1117" stroke-width="1.5"/>
+  <circle cx="303.3" cy="321.2" r="3.5" fill="#58a6ff" stroke="#0d1117" stroke-width="1.5"/>
+  <circle cx="303.3" cy="90.2" r="3.5" fill="#3fb950" stroke="#0d1117" stroke-width="1.5"/>
+  <circle cx="396.7" cy="332.6" r="3.5" fill="#58a6ff" stroke="#0d1117" stroke-width="1.5"/>
+  <circle cx="396.7" cy="74.8" r="3.5" fill="#3fb950" stroke="#0d1117" stroke-width="1.5"/>
+  <circle cx="408.3" cy="331.5" r="3.5" fill="#58a6ff" stroke="#0d1117" stroke-width="1.5"/>
+  <circle cx="408.3" cy="77.1" r="3.5" fill="#3fb950" stroke="#0d1117" stroke-width="1.5"/>
+  <circle cx="420.0" cy="333.1" r="3.5" fill="#58a6ff" stroke="#0d1117" stroke-width="1.5"/>
+  <circle cx="420.0" cy="73.2" r="3.5" fill="#3fb950" stroke="#0d1117" stroke-width="1.5"/>
+  <circle cx="536.7" cy="336.6" r="3.5" fill="#58a6ff" stroke="#0d1117" stroke-width="1.5"/>
+  <circle cx="536.7" cy="67.3" r="3.5" fill="#3fb950" stroke="#0d1117" stroke-width="1.5"/>
+  <circle cx="653.3" cy="336.8" r="3.5" fill="#58a6ff" stroke="#0d1117" stroke-width="1.5"/>
+  <circle cx="653.3" cy="65.9" r="3.5" fill="#3fb950" stroke="#0d1117" stroke-width="1.5"/>
+  <circle cx="758.3" cy="337.5" r="3.5" fill="#58a6ff" stroke="#0d1117" stroke-width="1.5"/>
+  <circle cx="758.3" cy="64.8" r="3.5" fill="#3fb950" stroke="#0d1117" stroke-width="1.5"/>
+  <circle cx="770.0" cy="337.5" r="3.5" fill="#58a6ff" stroke="#0d1117" stroke-width="1.5"/>
+  <circle cx="770.0" cy="64.5" r="3.5" fill="#3fb950" stroke="#0d1117" stroke-width="1.5"/>
+  <!-- Callout Final -->
+  <rect x="613.3333333333333" y="297.48" width="140" height="32" rx="6" fill="#161b22" stroke="#58a6ff" stroke-width="1"/>
+  <text x="683.3333333333333" y="311.48" fill="#f0f6fc" font-family="system-ui, -apple-system, sans-serif" font-size="10" font-weight="600" text-anchor="middle">Step 5900: Loss 0.090</text>
+  <text x="683.3333333333333" y="323.48" fill="#3fb950" font-family="system-ui, -apple-system, sans-serif" font-size="10" text-anchor="middle">98.3% next-token acc</text>
+</svg>
