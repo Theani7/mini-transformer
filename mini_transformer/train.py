@@ -6,7 +6,7 @@ from pathlib import Path
 import torch
 import torch.nn.functional as F
 
-from .config import Config
+from .config import Config, resolve_checkpoint_config
 from .data import get_batch, load_corpus, load_packed, pack_ids
 from .init import init_weights
 from .model import MiniTransformer
@@ -79,10 +79,12 @@ def main(argv=None):
 
     # The stamp is a cache, written only by this module, so a format change
     # should invalidate it rather than crash. `Config.load` stays strict for
-    # every other caller.
+    # every other caller. `ValueError` covers the other half of "format change":
+    # `Config.save` is a non-atomic `write_text`, so a crash mid-write leaves
+    # truncated JSON and `json.loads` raises `JSONDecodeError`.
     try:
         stamp = Config.load(stamp_path) if stamp_path.exists() else None
-    except TypeError:
+    except (TypeError, ValueError):
         stamp = None
 
     stale = stamp is None or _cache_key(stamp) != _cache_key(config)
@@ -105,15 +107,35 @@ def main(argv=None):
 
     start = 0
     out_path = Path(args.out)
+    state = None
     if args.resume and out_path.exists():
         state = torch.load(out_path, map_location=device, weights_only=True)
-        model.load_state_dict(state["model"])
         start = state["step"]
         print(f"resumed from step {start}")
 
+    # After the early return on purpose. A checkpoint that already holds the
+    # requested step count is reported as finished, whatever flags this run was
+    # given: passing a *lower* --iters than the one it was trained under is a
+    # legitimate no-op, and the strict diff below would otherwise reject it.
     if start >= config.iters:
         print(f"nothing to do: {out_path} already holds step {start}")
         return
+
+    if state is not None:
+        # Before the load, not after: naming the differing hyperparameter beats
+        # reporting a size mismatch it caused. `generate` checks in the same
+        # order, which is why both loaders share `resolve_checkpoint_config`.
+        # `iters` is ignored because raising it is what `--resume` is for; every
+        # other field silently changing mid-run is the bug this closes.
+        resolve_checkpoint_config(
+            state.get("config"), config, out_path, ignore={"iters"}
+        )
+        try:
+            model.load_state_dict(state["model"])
+        except RuntimeError as exc:
+            raise ValueError(
+                f"checkpoint weights do not fit the requested config: {exc}"
+            ) from exc
 
     optimizer = build_optimizer(model, config)
     generator = torch.Generator().manual_seed(config.seed)

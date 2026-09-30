@@ -4,7 +4,7 @@ from pathlib import Path
 
 import torch
 
-from .config import Config
+from .config import resolve_checkpoint_config
 from .model import MiniTransformer
 from .tokenizer import EOT, decode, encode, load_tokenizer
 from .train import resolve_device
@@ -21,33 +21,17 @@ def load_checkpoint(path, device, vocab_size, config=None):
 
     state = torch.load(path, map_location=device, weights_only=True)
 
-    # Checked before *both* uses of `saved` below. Filtering only at the
-    # `Config(**saved)` call would turn this into an AttributeError further down,
-    # because the diff loop still walks the raw dict.
-    saved = state.get("config")
-    unknown = set(saved or {}) - Config.__dataclass_fields__.keys()
-    if unknown:
+    # Before the weight and vocabulary checks below, and before the model is
+    # built: naming a differing hyperparameter is more useful than whatever
+    # downstream error it would otherwise cause.
+    config = resolve_checkpoint_config(state.get("config"), config, path)
+
+    if "model" not in state or "token_embedding.weight" not in state["model"]:
         raise ValueError(
-            f"{path} was written by a different version "
-            f"({', '.join(sorted(unknown))}) - retrain, or check out the "
-            f"version that wrote it"
+            f"{path} is not a mini-transformer checkpoint (no 'model' entry with a "
+            f"token embedding) - point --checkpoint at a file written by "
+            f"mini_transformer.train"
         )
-
-    if config is None:
-        config = Config(**saved) if saved is not None else Config()
-
-    if saved is not None:
-        differing = {
-            key: (saved[key], getattr(config, key))
-            for key in saved
-            if saved[key] != getattr(config, key)
-        }
-        if differing:
-            named = ", ".join(
-                f"{k} (checkpoint {old!r}, requested {new!r})"
-                for k, (old, new) in sorted(differing.items())
-            )
-            raise ValueError(f"checkpoint config differs: {named}")
 
     saved_vocab = state["model"]["token_embedding.weight"].shape[0]
     if saved_vocab != vocab_size:

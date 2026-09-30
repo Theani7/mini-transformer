@@ -125,6 +125,73 @@ def test_a_checkpoint_from_another_version_names_the_unknown_field_even_when_a_c
         load_checkpoint(path, "cpu", vocab_size=64, config=Config())
 
 
+def test_a_checkpoint_with_no_config_key_loads_but_says_so(tmp_path, capsys):
+    """An older or hand-written checkpoint may carry weights and step but no
+    `config`. It still loads - but under the *current* defaults, which may not be
+    what it was trained with, so the design spec asks for a warning here."""
+    from mini_transformer.init import init_weights
+    from mini_transformer.model import MiniTransformer
+
+    model = MiniTransformer(vocab_size=64, config=Config())
+    init_weights(model, Config().n_layer)
+    path = tmp_path / "model.pt"
+    torch.save({"model": model.state_dict(), "step": 1}, path)
+
+    loaded, loaded_config = load_checkpoint(path, "cpu", vocab_size=64)
+
+    assert loaded_config == Config()
+    assert loaded.lm_head.weight.shape == (64, Config().d_model)
+    assert "stored no config" in capsys.readouterr().err
+
+
+@pytest.mark.parametrize(
+    "state",
+    [
+        pytest.param({"step": 1}, id="no-model-key"),
+        pytest.param({"model": {"weight": torch.zeros(4, 4)}, "step": 1}, id="no-embedding"),
+    ],
+)
+def test_a_foreign_state_dict_is_a_value_error_not_a_bare_key_error(tmp_path, state):
+    """`cli()`'s own docstring promises `main` raises `ValueError` for anything
+    the user can fix, and `mini-transformer` is the first command a user runs.
+    A foreign or legacy `state_dict` used to escape as a bare `KeyError`, which
+    `cli` does not catch, so the console script printed a traceback."""
+    path = tmp_path / "model.pt"
+    torch.save(state, path)
+
+    with pytest.raises(ValueError, match="is not a mini-transformer checkpoint"):
+        load_checkpoint(path, "cpu", vocab_size=64)
+
+
+def test_a_foreign_state_dict_reaches_the_console_script_as_a_one_line_message(
+    tmp_path, monkeypatch
+):
+    checkpoint = tmp_path / "model.pt"
+    torch.save({"step": 1}, checkpoint)
+    tokenizer_path = tmp_path / "tokenizer.json"
+    from mini_transformer.tokenizer import train_tokenizer
+
+    train_tokenizer([TEXT], 64, tokenizer_path)
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "mini-transformer",
+            "--checkpoint",
+            str(checkpoint),
+            "--tokenizer",
+            str(tokenizer_path),
+            "--device",
+            "cpu",
+        ],
+    )
+
+    with pytest.raises(SystemExit) as exit_info:
+        cli()
+
+    assert "is not a mini-transformer checkpoint" in str(exit_info.value)
+
+
 def test_a_missing_tokenizer_names_the_path_instead_of_a_traceback(tmp_path):
     with pytest.raises(ValueError, match="tokenizer.json not found - run:"):
         main(

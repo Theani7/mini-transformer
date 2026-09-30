@@ -173,3 +173,92 @@ def test_iteration_flags_do_not_invalidate_the_cache(monkeypatch, tmp_path):
     _run(monkeypatch, tmp_path, ["--iters", "9", "--device", "cpu", "--batch-size", "2"])
 
     assert len(packs) == 1
+
+
+def test_the_head_is_sized_from_the_tokenizer_not_the_requested_vocab(monkeypatch, tmp_path):
+    """`tokenizer.get_vocab_size()` is what the head is built from, because the
+    corpus only yielded 6,582 of the 8,192 requested merges. Sizing from
+    `config.bpe_vocab_size` instead trains a head with 1,610 rows the tokenizer
+    can never emit, and the last logit is dead.
+
+    Nothing else pinned this: Task 2's test guards the tokenizer's *return
+    value*, Task 9's guards the generate CLI, and the trainer's *use* of it had
+    no guard at all - the wrong value passed the whole suite. The `!=` below is
+    what keeps that from becoming a vacuous assertion if the test corpus ever
+    trains to exactly `bpe_vocab_size` merges.
+    """
+    from mini_transformer.model import MiniTransformer
+    from mini_transformer.tokenizer import load_tokenizer
+
+    seen = []
+    real_init = MiniTransformer.__init__
+
+    def spy(self, vocab_size, config):
+        seen.append(vocab_size)
+        real_init(self, vocab_size, config)
+
+    monkeypatch.setattr(MiniTransformer, "__init__", spy)
+
+    _run(monkeypatch, tmp_path, ["--iters", "1", "--device", "cpu"])
+
+    requested = _FastConfig().bpe_vocab_size
+    assert seen == [load_tokenizer(tmp_path / "data" / "tokenizer.json").get_vocab_size()]
+    assert seen[0] != requested
+
+
+def test_resume_rejects_a_checkpoint_trained_with_different_flags(monkeypatch, tmp_path):
+    """`--resume` used to read only `state["model"]` and `state["step"]`, so this
+    silently resumed under the NEW hyperparameters and then overwrote the saved
+    `config` - the mismatch `generate.load_checkpoint` exists to refuse."""
+    _run(monkeypatch, tmp_path, ["--iters", "5", "--device", "cpu", "--batch-size", "8"])
+
+    with pytest.raises(ValueError, match=r"batch_size \(checkpoint 8, requested 2\)"):
+        _run(
+            monkeypatch,
+            tmp_path,
+            ["--iters", "9", "--device", "cpu", "--batch-size", "2", "--resume"],
+        )
+
+
+def test_resume_can_still_extend_a_run_to_a_higher_iters(monkeypatch, tmp_path):
+    """The counterweight to the strict diff: `iters` is exempted, because raising
+    it is the entire purpose of `--resume`. Without the exemption the diff would
+    reject its own reason for existing."""
+    _run(monkeypatch, tmp_path, ["--iters", "3", "--device", "cpu"])
+
+    _run(monkeypatch, tmp_path, ["--iters", "7", "--device", "cpu", "--resume"])
+
+    assert torch.load(tmp_path / "m.pt", weights_only=True)["step"] == 7
+
+
+def test_resume_reports_weights_that_do_not_fit_as_a_value_error(monkeypatch, tmp_path):
+    """The identical call in `generate.py` is wrapped in a `ValueError`, which
+    both CLIs turn into a one-line message. Bare here, `--resume` on a
+    mismatched checkpoint dumps a raw `RuntimeError` traceback."""
+    _run(monkeypatch, tmp_path, ["--iters", "5", "--device", "cpu"])
+
+    out = tmp_path / "m.pt"
+    state = torch.load(out, weights_only=True)
+    # A wrong-shaped tensor that no `Config` field controls, so the config
+    # check passes and the failure can only come from the weight load.
+    state["model"]["token_embedding.weight"] = torch.zeros(4, 192)
+    torch.save(state, out)
+
+    with pytest.raises(ValueError, match="checkpoint weights do not fit"):
+        _run(monkeypatch, tmp_path, ["--iters", "9", "--device", "cpu", "--resume"])
+
+
+def test_a_truncated_stamp_is_treated_as_a_cache_miss(monkeypatch, tmp_path):
+    """`Config.save` is a non-atomic `write_text`, so a crash mid-write leaves
+    truncated JSON behind, and `Config.load` raises `JSONDecodeError` - a
+    `ValueError`, which the guard above did not catch. The comment on that guard
+    claimed a format change should invalidate the cache rather than crash it."""
+    packs = _spy(monkeypatch, "pack_ids")
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "config.json").write_text('{"d_model": 192, "n_lay')
+
+    _run(monkeypatch, tmp_path, ["--iters", "1", "--device", "cpu"])
+
+    assert len(packs) == 1
+    assert Config.load(data_dir / "config.json").corpus_chars == Config().corpus_chars
