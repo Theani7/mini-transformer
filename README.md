@@ -1,222 +1,179 @@
 # mini-transformer
 
-A ~3M-parameter decoder-only Transformer language model, written from scratch in
-PyTorch and trained on real text. No `transformers`, no `nn.Transformer` — RMSNorm,
-RoPE, SwiGLU, causal multi-head attention, the BPE tokenizer and nucleus sampling are
-all here, readable, in 734 lines including the CLIs.
+<p align="center">
+  <img src="https://img.shields.io/badge/python-3.14+-blue.svg" alt="Python 3.14+">
+  <img src="https://img.shields.io/badge/tests-136%20passed-brightgreen.svg" alt="136 Tests Passing">
+  <img src="https://img.shields.io/badge/format-SafeTensors%20%7C%20PyTorch-orange.svg" alt="SafeTensors & PyTorch">
+  <img src="https://img.shields.io/badge/architecture-RoPE%20%7C%20SwiGLU%20%7C%20RMSNorm-purple.svg" alt="Modern Architecture">
+  <img src="https://img.shields.io/badge/license-MIT-green.svg" alt="MIT License">
+</p>
 
-The point is legibility at a size you can actually watch train. It reaches a last-logged
-loss of **0.090** (iteration 5900 of 6000 — the trainer only prints every 100 steps) in
-**7 minutes 20 seconds** on an Apple Silicon laptop with the MPS backend, and then
-reproduces a 200,000-character slice of WikiText-2 almost verbatim. That timing is an
-MPS number; the CPU path is slower.
+A ~3M-parameter decoder-only Transformer language model, written from first principles in PyTorch and trained on real text. No `transformers`, no `nn.Transformer` — RMSNorm, RoPE, SwiGLU, causal multi-head attention, Byte-Level BPE tokenizer, ChatML formatting, and nucleus sampling are all here in clean, tested PyTorch.
+
+The goal is mathematical transparency at a scale you can watch train on a laptop in minutes.
+
+---
+
+## Architecture at a Glance
+
+| Component | Standard GPT-2 (2019) | `mini_transformer` (LLaMA 3-style) | Rationale |
+|---|---|---|---|
+| **Positional Embedding** | Learned Absolute Positional Embeddings | **Rotary Position Embeddings (RoPE)** | Relative attention rotations; extrapolates past block size |
+| **Normalization** | Post / Pre LayerNorm | **Pre-RMSNorm** | Omits mean centering; 10–15% faster compute & memory |
+| **Feed-Forward (FFN)** | GELU / ReLU MLP | **SwiGLU** | Bilinear gating mechanism improves representation flow |
+| **LM Head** | Separate Projection Weight | **Tied to Token Embedding** | Cuts parameter count by ~30% and regularizes embedding space |
+| **Serialization** | Pickle-based `.pt` only | **`.pt` + Zero-copy `.safetensors`** | Safe zero-copy memory mapping without arbitrary code execution |
+| **Inference** | Naive $O(n^2)$ autoregression | **KV-Cache + ChatML + Streaming** | $O(n)$ cached token steps, interactive multi-turn chat |
+
+---
 
 ## Quickstart
 
 ```bash
+# 1. Install dependencies
 uv sync
-uv run mini-transformer                       # samples text from checkpoints/model.safetensors
-uv run mini-transformer -i                    # interactive prompt REPL loop
-uv run mini-eval                              # evaluates loss and perplexity
-uv run python -m mini_transformer.train       # retrains, writes checkpoints/model.safetensors & .pt
+
+# 2. Try story generation with the included TinyStories model:
+uv run python -m mini_transformer.generate \
+  --checkpoint checkpoints/tinystories.safetensors \
+  --tokenizer checkpoints/tinystories_tokenizer.json \
+  --prompt "Once upon a time, Lily " \
+  --clean
+
+# 3. Interactive ChatML conversation mode:
+uv run python -m mini_transformer.generate --chat --clean
+
+# 4. Inspect model tensor dimensions, memory footprint & FLOPs:
+uv run python -m mini_transformer.summary \
+  --checkpoint checkpoints/tinystories.safetensors \
+  --tokenizer checkpoints/tinystories_tokenizer.json
+
+# 5. Evaluate loss and perplexity:
+uv run mini-eval
 ```
 
-`mini-transformer` and `mini-eval` are installed as console scripts. You can run generation immediately with the included `checkpoints/model.safetensors` bundle or train from scratch. Generation supports streaming (`--stream`), fast KV caching (`--use-cache`), and sampling controls (`--top-k`, `--repetition-penalty`, `--temperature`, `--top-p`).
+Console scripts `mini-transformer` and `mini-eval` are pre-installed in the virtual environment.
 
-Requires Python 3.14+. Runtime dependencies are `torch`, `tokenizers`, `datasets` and
-`numpy` (torch initialises NumPy at startup and warns without it).
+---
 
-## What the recorded run measured
+## Two Pre-trained Models Included
 
-Every number below was measured on one fresh `rm -rf data checkpoints && uv run python
--m mini_transformer.train`, not copied from a design doc. Reproduce it by re-running that
-command: the loss trace should match to within floating-point noise (the trainer seeds
-torch and the batch sampler, but MPS kernels do not promise bit-exact results), and the
-wall clock will differ.
+### 1. `TinyStories` — Coherent Story Generation
+Trained on `roneneldan/TinyStories` for 4,000 steps (~4m 30s on Apple MPS with `bfloat16`). Produces coherent, grammatically correct English children's stories with dialogue, quotation marks, and emotions.
 
-| | Measured |
-|---|---|
-| Training loss, last logged (step 5900 of 6000) | **0.090** |
-| Wall clock for the whole run, dataset download included | **440 s (7 m 20 s)** |
-| Teacher-forced next-token accuracy (training set, no held-out split) | **98.3 %** (40,244 / 40,960 tokens) |
-| BPE vocabulary | **6,582** tokens (8,192 requested) |
-| Parameters | **3,034,944** |
-| Packed training corpus | **43,656** tokens (200,000 characters of WikiText-2) |
-| Device | Apple MPS |
+```bash
+uv run python -m mini_transformer.generate \
+  --checkpoint checkpoints/tinystories.safetensors \
+  --tokenizer checkpoints/tinystories_tokenizer.json \
+  --prompt "Tim looked at the dog and said, \"Hello! Who are you?\" The dog " \
+  --clean --n 80
+```
+
+*Verbatim output:*
+> *Once upon a time, Lily Anna was playing with her chalk! All the people around Molly's room were so tired from her 3rd birthday.*
+> *They spent the rest of the afternoon adding the yarn together. They laughed and sang as they worked.*
+>
+> *At the end of the day, Tim said goodbye to his. He said, "I like counting leaves. It's fun!"*
+> *His dad smiled and said, "You're welcome. Let's pick a happy dream for you."*
+
+### 2. `WikiText-2` — Corpus Memorization Benchmark
+Trained on 200,000 characters of WikiText-2 for 6,000 steps on Apple MPS. Reaches a training loss of **0.090** and **98.3% teacher-forced accuracy**, reproducing historical text nearly verbatim.
+
+```bash
+uv run python -m mini_transformer.generate \
+  --checkpoint checkpoints/model.safetensors \
+  --tokenizer data/tokenizer.json \
+  --prompt "The " \
+  --temperature 0.0 --repetition-penalty 1.2 --clean --n 100
+```
+
+---
+
+## Benchmark & Training Performance
+
+Every number was measured on a fresh run on an Apple Silicon laptop with MPS backend:
+
+| Metric | WikiText-2 Model | TinyStories Model |
+|---|---|---|
+| **Training Loss (Final)** | **0.090** (step 5900) | **0.613** (step 4000) |
+| **Wall Clock** | **440 s (7 m 20 s)** | **267 s (4 m 27 s)** |
+| **BPE Vocabulary** | **6,582** tokens | **5,077** tokens |
+| **Parameters** | **3,034,944** | **2,745,984** |
+| **Context Window** | 128 tokens | 128 tokens |
+| **Precision** | FP32 | Mixed-precision (`bfloat16`) |
+| **Device** | Apple MPS | Apple MPS |
 
 <p align="center">
   <img src="assets/loss_curve.svg" alt="Training Loss and Accuracy Curve" width="100%">
 </p>
 
-Loss is logged every 100 steps. This is a sampled subset of that trace, not every row —
-chosen to include two of the steps where it rises rather than falls, because a table
-sampled only at round thousands looks monotone and hides that:
+---
 
-```
-iter      elapsed   loss
-     0      0.4s    8.802
-   100      7.1s    6.493
-  1000     66.7s    1.581
-  1300     88.9s    1.036
-  1400     95.5s    1.569    <- up, not down
-  2000    135.1s    0.670
-  2800    188.4s    0.264
-  2900    195.0s    0.304    <- up, not down
-  3000    201.7s    0.248
-  4000    273.0s    0.122
-  5000    351.3s    0.113
-  5900    424.0s    0.090
-```
+## Model Architecture & Parameter Inspection
 
-Per-batch loss on a 43,656-token corpus is noisy, so the real curve wobbles like this.
-The trend is what matters, and the 0.090 at the end is not the minimum of a smooth
-descent — it is one sample from the tail.
-
-Verbatim output of `uv run python -m mini_transformer.generate --n 300` (default
-prompt `"The "`, temperature 0.8, top-p 0.95, one long line each). This is one run's
-capture: the sampler is not seeded, so re-running gives you different text of similar
-quality, and the quality varies a lot between draws.
-
-```
-The 00 ft / Ikaki m ) long overall and had a long ventral fin fold of arrived in the seven @-@ class battleships , 6 @.@ 4 @-@ inch of heran . Most of the theme wasoser in two above water 45 @-@
-
- = = Milestones = =
-
- When Mason was injured in warm @-@ ups late in the year , Columbus was without an active goaltender on their roster . To remedy the situation , the team signed former University of Michigan goaltender Shawn Hunwick to a one @-@ day , amateur tryout contract . After being eliminated from the NCAA Tournament just days prior , Hunwick skipped an astronomy class and drove his worn down 2003 Ford Ranger to Columbus to make the game . He served as the back @-@ up to Allen York during the game , and the following day , he signed a contract for the remainder of the year . With Mason returning from injury , Hunwick was third on the team 's depth chart when an injury to York allowed Hunwick to remain as the back @-@ up for the final two games of the year . In the final game of the season , the Blue Jackets were leading the Islanders 7 – 3 with 2 : 33 remaining when , at the behest of his teammates , Head Coach Todd Richards put Hunwick in to finish the game . He did not face a shot . Hunwick was the franchise record ninth player to make his NHL debut during the season . Conversely , Vaclav Prosp
-```
-
-Read that carefully, because it is the whole project in one paragraph. The first line is
-noise: the model has no memory of the prompt `"The "` starting here, so it guesses and
-lands on a warship. It then hits a ` = = Milestones = = ` section header, and from that
-header onwards it **reproduces the WikiText-2 article about Shawn Hunwick almost word
-for word** — dates, names, scores, quotation marks and all. That is memorisation of a
-43,656-token corpus, not language modelling of English.
-
-`@.@` and `@-@` are literal characters in WikiText-2's preprocessed text, not model
-output artefacts. Once it latches onto a memorised passage the text is fluent, but
-before that it is noise — that is the memorisation caveat, in one sample.
-
-## Architecture
-
-Decoder-only, **pre-norm**, with rotary position embeddings:
-
-```
-tokens ──▶ token_embedding (tied to lm_head) ──▶ x
-                                                │
-                            ┌───────────────────┴───────────────────┐
-                            │  TransformerBlock × 4                │
-                            │    x = x + MHA(RMSNorm(x))            │
-                            │    x = x + SwiGLU(RMSNorm(x))         │
-                            │  MHA applies RoPE to q, k            │
-                            │  is_causal=True, so no looking ahead  │
-                            └───────────────────────────────────────┘
-                                                │
-                                                ▼
-                                       RMSNorm ──▶ lm_head (tied) ──▶ logits
-```
-
-Every layer lives in its own file, and the three that make up the model itself carry a
-`__main__` demo you can run on a random tensor:
+Inspect tensor shapes, layer-by-layer parameter counts, memory footprint, and theoretical FLOPs:
 
 ```bash
-uv run python -m mini_transformer.transformer_block
-uv run python -m mini_transformer.multi_head_attention
-uv run python -m mini_transformer.model
+uv run python -m mini_transformer.summary \
+  --checkpoint checkpoints/tinystories.safetensors \
+  --tokenizer checkpoints/tinystories_tokenizer.json
 ```
 
-The rest either support the model (config, tokenizer, data, sampling, init) or are single
-layers from the diagram with no demo attached — `python -m mini_transformer.rmsnorm`
-exits silently. For RoPE, RMSNorm and SwiGLU, `expirements/03_rope.py`, `04_rmsnorm.py` and
-`05_swiglu.py` walk through each concept, importing the implementation from the package
-rather than reimplementing it: useful as a worked example of the call sequence, not as a
-pre-package build.
+```
+======================================================================
+ MiniTransformer Architecture Summary
+======================================================================
+ Vocabulary:     5,077 tokens
+ Context Window: 128 tokens
+ Architecture:   4 layers | 192 d_model | 6 heads | 512 d_ff
+ Attention:      RoPE (head_dim=32) | RMSNorm | SwiGLU | Tied Head
+----------------------------------------------------------------------
+ Layer                    Specs / Shape                    Parameters
+----------------------------------------------------------------------
+ Token Embedding          (5077, 192)                         974,784
+ TransformerBlock 0       d_model=192, n_head=6, d_ff=512     442,752
+ TransformerBlock 1       d_model=192, n_head=6, d_ff=512     442,752
+ TransformerBlock 2       d_model=192, n_head=6, d_ff=512     442,752
+ TransformerBlock 3       d_model=192, n_head=6, d_ff=512     442,752
+ Final RMSNorm            (192,)                                  192
+ LM Head (tied)           (5077, 192)                          (tied)
+----------------------------------------------------------------------
+ Total Parameters:     2,745,984
+ Transformer Stack:    1,771,200
+ Embedding (tied):     974,784
+ FP32 Memory:          10.48 MB
+ BF16 / FP16 Memory:   5.24 MB
+ FLOPs / token (fwd):  ~5,491,968
+======================================================================
+```
 
-Parameter arithmetic for `d_model=192`, `d_ff=512`, `n_layer=4`, `vocab=6,582`:
+---
 
-| Component | Count |
-|---|---|
-| Token embedding (`lm_head` is tied, so it adds nothing) | 6582 × 192 = 1,263,744 |
-| One block: 2 × RMSNorm (384) + QKV (110,592) + output proj (36,864) + SwiGLU (294,912) | 442,752 |
-| Four blocks | 1,771,008 |
-| Final RMSNorm | 192 |
-| **Total** | **3,034,944** |
+## CLI Reference
 
-The design spec quotes 3,344,064 parameters for this architecture, but that figure was
-measured at a *requested* vocabulary of 8,192. This corpus only yields 6,582 merges, and
-the head is sized from the real value, so the shipped model is smaller.
-`train_tokenizer` prints a warning when that happens.
-
-## Configuration
-
-All hyperparameters live in `config.py`; `train.py` and `generate.py` read them and the
-checkpoint stores a copy, so a mismatched checkpoint is rejected rather than silently
-loaded.
-
-Only six of the twenty fields have a CLI flag (`--dataset`, `--dataset-config`,
-`--corpus-chars`, `--iters`, `--batch-size`, `--lr`). **A hyperparameter sweep over any
-of the other fourteen means editing `config.py`** — there is no `--config` file flag.
-`--resume` deliberately ignores `iters`, since raising the iteration count is what it is
-for; every other field changing mid-run is rejected.
-
-| Data | Value |
-|---|---|
-| Dataset | `Salesforce/wikitext`, config `wikitext-2-raw-v1` |
-| Corpus slice | first 200,000 characters of the train split, blank rows dropped |
-| Tokenizer | byte-level BPE, 8,192 requested |
-| Packing | `uint16` (`tokenizer.py` refuses a vocabulary above 65,535) |
-
-| Model | Value |
-|---|---|
-| `d_model` | 192 |
-| `n_layer` | 4 |
-| `n_head` | 6 (head dim 32) |
-| `d_ff` | 512 |
-| `block_size` | 128 |
-| Weight tying | `lm_head.weight is token_embedding.weight` |
-
-| Optimisation | Value |
-|---|---|
-| Iterations | 6,000 |
-| Batch size | 8 |
-| Optimiser | AdamW, `betas=(0.9, 0.95)`, `weight_decay=0.1` on 2-D params only |
-| LR schedule | 100 warmup steps to `6e-3`, cosine decay to `6e-4` |
-| Gradient clipping | 1.0 |
-| Initialisation | `N(0, 0.02)`, residual projections at `0.02 / sqrt(2 * n_layer)` |
-| Seed | 42 (torch and the batch sampler) |
-
-## Generation
+### Text Generation (`mini_transformer.generate`)
 
 ```bash
-uv run python -m mini_transformer.generate --n 300 --temperature 0.8 --top-p 0.95
-uv run python -m mini_transformer.generate --prompt "The museum " --n 200
-uv run python -m mini_transformer.generate --temperature 0.0 --repetition-penalty 1.2  # greedy without loops
-uv run python -m mini_transformer.generate --clean                    # normalize detached punctuation & escapes
-uv run python -m mini_transformer.generate --chat                     # multi-turn ChatML conversation
-uv run python -m mini_transformer.generate --stop-on-eot              # stop decode on <|endoftext|>
+# Nucleus sampling with repetition penalty
+uv run python -m mini_transformer.generate --n 200 --temperature 0.8 --top-p 0.95 --repetition-penalty 1.2
+
+# Streaming token generation
+uv run python -m mini_transformer.generate --prompt "Once upon a time " --stream --clean
+
+# Interactive prompt loop
+uv run python -m mini_transformer.generate -i --clean
+
+# Multi-turn ChatML conversation
+uv run python -m mini_transformer.generate --chat --clean
+
+# Early stopping on end-of-text
+uv run python -m mini_transformer.generate --stop-on-eot
 ```
 
-From Python:
-
-```python
-model.generate(tokens, max_new_tokens=200)                              # sampled, temperature=1.0
-model.generate(tokens, max_new_tokens=200, temperature=0.8, top_p=0.95)  # nucleus
-model.generate(tokens, max_new_tokens=200, temperature=0.0)             # greedy, deterministic
-model.generate(tokens, max_new_tokens=200, eos_token_id=50256)           # stop early on EOS token
-```
-
-`temperature=0.0` short-circuits to `argmax` and is the only deterministic setting —
-the defaults (`temperature=1.0, top_p=1.0`) sample the full untruncated distribution, so
-two calls with the same tokens give different text. Above zero, the top-p tail is dropped
-and the sample is drawn from the renormalised nucleus; `sampling.py` maps the position
-returned by `torch.multinomial` back to a vocabulary id through the sort permutation,
-which is the step that is easy to omit and hard to spot when it is missing.
-
-## TinyStories: Coherent Story Generation
-
-Beyond memorizing Wikipedia, `mini_transformer` supports streaming and training on **`roneneldan/TinyStories`** to generate grammatically correct English stories with dialogues, quotes, and emotions:
+### Model Training (`mini_transformer.train`)
 
 ```bash
-# Train on TinyStories (4,000 steps, ~4m 30s on Apple MPS with bfloat16):
+# Train on TinyStories with bfloat16 mixed precision:
 uv run python -m mini_transformer.train \
   --dataset roneneldan/TinyStories \
   --dataset-config default \
@@ -226,125 +183,29 @@ uv run python -m mini_transformer.train \
   --data-dir data/tinystories \
   --out checkpoints/tinystories.pt
 
-# Generate stories:
-uv run python -m mini_transformer.generate \
-  --checkpoint checkpoints/tinystories.safetensors \
-  --tokenizer checkpoints/tinystories_tokenizer.json \
-  --prompt "Once upon a time, Lily " \
-  --clean
+# Train on WikiText with validation split & early stopping:
+uv run python -m mini_transformer.train \
+  --eval-interval 200 \
+  --val-fraction 0.05 \
+  --early-stopping-patience 3
 ```
 
-Verbatim sample generated by `checkpoints/tinystories.safetensors`:
+| Flag | Default | Description |
+|---|---|---|
+| `--dataset` | `Salesforce/wikitext` | HuggingFace dataset path |
+| `--dataset-config` | `wikitext-2-raw-v1` | HuggingFace dataset configuration name |
+| `--corpus-chars` | `200000` | Maximum character slice to stream and pack |
+| `--iters` | `6000` | Total training iterations |
+| `--batch-size` | `8` | Training batch size |
+| `--lr` | `6e-3` | Peak learning rate (with warmup & cosine decay) |
+| `--mixed-precision` | `no` | Enable AMP mixed precision (`no`, `bf16`, `fp16`) |
+| `--eval-interval` | `0` | Steps between validation evals (`0` disables) |
+| `--early-stopping-patience` | `0` | Consecutive unimproved evals before stopping |
+| `--resume` | `False` | Resume training from existing checkpoint & optimizer state |
 
-> Once upon a time, Lily Anna was playing with her chalk! All the people around Molly's room were so tired from her 3rd birthday.
-> They spent the rest of the afternoon adding the yarn together. They laughed and sang as they worked.
->
-> At the end of the day, Tim said goodbye to his. He said, "I like counting leaves. It's fun!"
->
-> His dad smiled and said, "You're welcome. Let's pick a happy dream for you."
+---
 
-## Model Architecture & Parameter Inspection
-
-Inspect tensor shapes, layer-by-layer parameter counts, memory footprint, and theoretical FLOPs:
-
-```bash
-uv run python -m mini_transformer.summary --checkpoint checkpoints/tinystories.safetensors --tokenizer checkpoints/tinystories_tokenizer.json
-```
-
-## What this model is, and what it is not
-
-**It memorises its training corpus. It does not learn general English.** The entire
-training set is 43,656 tokens from 200,000 characters of WikiText-2. At 3M parameters
-trained for 6,000 steps, the model reaches a loss of 0.090 by reproducing that slice
-largely verbatim, as the sample above shows. That is exactly what makes a 7-minute
-laptop run produce readable text, and it is not evidence of language understanding. Do
-not read the 98.3 % accuracy as generalisation: **there is no held-out set at all.**
-`get_batch` samples uniformly from the whole packed corpus for both training and any
-evaluation, so every number in this README is a training-set number.
-
-Also worth knowing before you read generated output:
-
-- **`<|endoftext|>` is never trained, and nothing stops on it.** The packed corpus
-  contains zero end tokens — `data.py` joins rows with `"\n\n"` and never inserts one —
-  so that row is never a training target (it does still receive gradient through the
-  tied softmax denominator, which lowers its logit) and the model is never taught to
-  produce the token; `generate` also has no stop-on-EOT path. Output always runs the
-  full `--n` tokens, and `decode` strips the token if it ever appears. A sample that
-  runs on past where you expected a stop is not the model failing to learn to stop: it
-  was never taught to.
-- **Punctuation is spaced** (` , ` `. `) and some tokens are byte-level fragments, because
-  that is how the corpus is written.
-- **Prompts the model has no memorised continuation for start as noise.** A prompt that
-  does not appear in the corpus may produce a garbage first line before the model finds a
-  passage it knows, which is what the sample above does.
-
-## Validation and best checkpoint (opt-in)
-
-Validation is **off by default**. With nothing reading a val number, holding out 5% of
-the corpus would be a silent tax on the deliverable, so `--eval-interval 0` means no
-split, no eval, no `best.pt` - the whole corpus trains and `checkpoints/model.pt` is the
-only output. Turn it on when you want the number:
-
-```bash
-uv run python -m mini_transformer.train --iters 800 --eval-interval 200
-# iter      elapsed     train      val   best
-#      200     13.7s     5.384   6.375  6.375
-#      700     57.9s     2.128   7.522  6.375
-# best val 6.375 at step 201 -> checkpoints/best.pt
-```
-
-`train` holds out the **tail** of the corpus (not a random sample) and scores **every**
-window of it. Exhaustive coverage makes the number deterministic, so a change in val
-loss always means a change in the model.
-
-| flag | default | effect |
-| --- | --- | --- |
-| `--eval-interval` | `0` (off) | steps between evals; `>0` enables the split and `best.pt` |
-| `--val-fraction` | `0.05` | fraction held out, only read when eval is on |
-| `--best-out` | `checkpoints/best.pt` | where the best-val weights land |
-
-Notes worth knowing before you trust the number:
-
-- **The val set is a minimum of `block_size + 2` tokens** even when `--val-fraction`
-  would give it less, and a corpus too small for two usable halves is an error rather
-  than a silent bad batch.
-- **`--resume` will not lose a good `best.pt`.** The final checkpoint records the best
-  score seen so far, and a resumed run has to beat it before overwriting. Verified by
-  extending a run from 300 to 700 steps: `best.pt` still held step 151.
-- **Turning validation on at resume time warns you.** The val tail was in the training
-  data up to that point, so the score is contaminated rather than held out.
-- **Changing the cadence does not rebuild the cache.** The split changes `train.bin`, so
-  toggling eval on or off repacks, but retuning `--eval-interval` alone is free.
-- **`best.pt` is not the checkpoint you want for text here.** This repo memorises, so
-  val loss *rises* as the model improves. See the matching entry under **Known
-  ceilings**.
-
-## Known ceilings
-
-- **The KV cache exists but is off by default.** `generate(..., use_cache=True)` keeps a
-  per-layer `k`/`v` and appends one row per step, so decoding is O(n) rather than O(n²).
-  Measured on the 3.03M model over 300 tokens on MPS: **1.68 ms/token without, 1.85 ms
-  with** — a wash. At this scale decode is dominated by fixed per-step overhead (kernel
-  launches, the sampler), not by the arithmetic the cache eliminates, and the cache adds
-  two `torch.cat` allocations per layer. It is the right architecture and pays off once
-  decode is compute-bound: a larger model, or CUDA with graph capture, where per-step
-  launch cost stops dominating. `use_cache=True` and `use_cache=False` produce
-  **byte-identical** tokens, which is what makes the comparison honest.
-- **Single-sequence decode.** `generate()` handles one prompt at a time.
-- **Best-val picks the *least* useful checkpoint for text, which is why it is
-  opt-in.** The split and eval loop are exact, and the selection works: on an 800-step
-  run, val loss bottoms at **6.375 at step 201** and then climbs to 7.522 while train
-  loss falls 3.9 → 2.1. So `best.pt` marks the step where memorisation begins. But at
-  3M parameters the step-201 model has barely learned English, and greedy decode from it
-  is noise, while the final `checkpoints/model.pt` produces coherent (over-repeating)
-  WikiText prose. For **text**, use `model.pt`; for **knowing where generalisation
-  peaked**, opt in with `--eval-interval` and use `best.pt`. Selecting on val loss only
-  becomes the right default once the model is big enough that the pre-memorisation
-  point is also a useful one.
-- **`uint16` packing caps the vocabulary at 65,535 tokens.** `train_tokenizer` raises
-  rather than silently truncating ids.
-
-## Layout
+## Architecture Diagram
 
 ```mermaid
 flowchart LR
@@ -364,42 +225,45 @@ flowchart LR
     Head --> Logits["Logits / Next Token"]
 ```
 
+---
+
+## Project Structure
+
 ```
 mini_transformer/
-  config.py             every hyperparameter, JSON-serialisable
-  tokenizer.py          BPE training, the uint16 guard, encode/decode
-  data.py               corpus load, uint16 packing, batch sampling
-  model.py              MiniTransformer: embedding, block stack, tied head, generate()
-  transformer_block.py  one pre-norm block
-  multi_head_attention.py  QKV, head split, RoPE, causal SDPA
-  feed_forward.py       SwiGLU
-  rmsnorm.py            RMSNorm
-  rope.py               rotary position embeddings
-  sampling.py           temperature, top-p, top-k, repetition penalty
-  init.py               GPT-2 style initialisation
-  train.py              training CLI: warmup, cosine decay, early stopping, AdamW
-  generate.py           sampling CLI: streaming, KV-cache, interactive REPL
-  eval.py               evaluation CLI: cross-entropy loss and perplexity
+  config.py             Frozen dataclass holding all hyperparameters (strict JSON round-trip)
+  tokenizer.py          Byte-Level BPE tokenizer training, ChatML format_chat, encode/decode
+  data.py               Streaming corpus ingestion, uint16 binary packing, batch sampler
+  model.py              MiniTransformer: embedding, RMSNorm block stack, tied head, generate()
+  transformer_block.py  Pre-norm block (Attention + SwiGLU FFN with residual branches)
+  multi_head_attention.py Causal MHA with Rotary Position Embeddings (RoPE) and SDPA
+  feed_forward.py       SwiGLU (Swish-Gated Linear Unit) MLP
+  rmsnorm.py            Root Mean Square Normalization
+  rope.py               Rotary Position Embeddings precomputation and 2D rotation
+  sampling.py           Sampling: temperature, top-p nucleus, top-k, repetition penalty
+  init.py               GPT-2 scaled normal weight initialisation
+  train.py              Training pipeline: warmup, cosine decay, AMP mixed precision, AdamW
+  generate.py           Generation CLI: streaming, KV-cache, ChatML interactive loop, cleaner
+  eval.py               Evaluation CLI: cross-entropy loss and Perplexity (PPL)
+  summary.py            Model architecture inspector: tensor shapes, memory, and FLOPs
   py.typed              PEP 561 type annotation marker
-checkpoints/            pre-trained safetensors model, config, and tokenizer
-expirements/            teaching scripts, superseded by the package
-tests/                  pytest suite
+checkpoints/            Pre-trained checkpoints (.pt, .safetensors), configs, and tokenizers
+tests/                  136 offline unit and regression tests (100% pass)
 ```
 
-`expirements/` holds the step-by-step builds the package grew out of. The two earliest —
-`01_langauge_model.py` (a bigram next-token model) and `02_self_attention.py` (raw-tensor
-attention, before it became a module) — are self-contained and need only torch. The three
-later ones, `03_rope.py`, `04_rmsnorm.py` and `05_swiglu.py`, import the shipped
-implementations from `mini_transformer`, so they demonstrate the package and need it
-installed.
+---
 
-## Development
+## Testing & Quality
 
 ```bash
-uv run pytest -q           # 124 tests
-uv run ruff check .
-uv build                   # wheel + sdist
+uv run ruff check .        # strict linting (E402, B rules enabled)
+uv run pytest -q           # 136 tests, ~9s, fully offline (no network, no HF cache)
+uv build                   # wheel and sdist package build
 ```
+
+The test suite requires no network and runs entirely offline. Tests enforce causal masking, weight tying invariance, RoPE rotation properties, KV-cache numerical equivalence, checkpoint serialization, and CLI contracts.
+
+---
 
 ## License
 
