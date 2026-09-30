@@ -140,11 +140,10 @@ def test_resume_never_downgrades_a_finished_checkpoint(monkeypatch, tmp_path, ca
 def test_stale_cache_is_retrained_when_the_corpus_changes(monkeypatch, tmp_path):
     packs = _spy(monkeypatch, "pack_ids")
 
-    _run(monkeypatch, tmp_path, ["--iters", "1", "--device", "cpu", "--corpus-chars", "4000"])
+    _run(monkeypatch, tmp_path, ["--iters", "1", "--device", "cpu", "--corpus-chars", "400"])
     _run(monkeypatch, tmp_path, ["--iters", "1", "--device", "cpu", "--corpus-chars", "9000"])
 
-    # two repacks, each writing a train and a val half
-    assert len(packs) == 4
+    assert len(packs) == 2
     assert Config.load(tmp_path / "data" / "config.json").corpus_chars == 9000
 
 
@@ -162,7 +161,7 @@ def test_a_stamp_from_another_version_is_treated_as_a_cache_miss(monkeypatch, tm
 
     _run(monkeypatch, tmp_path, ["--iters", "1", "--device", "cpu"])
 
-    assert len(packs) == 2  # one repack, two halves
+    assert len(packs) == 1
     rebuilt = json.loads((data_dir / "config.json").read_text())
     assert "retired_field" not in rebuilt
     assert rebuilt["corpus_chars"] == Config().corpus_chars
@@ -174,7 +173,7 @@ def test_iteration_flags_do_not_invalidate_the_cache(monkeypatch, tmp_path):
     _run(monkeypatch, tmp_path, ["--iters", "5", "--device", "cpu"])
     _run(monkeypatch, tmp_path, ["--iters", "9", "--device", "cpu", "--batch-size", "2"])
 
-    assert len(packs) == 2  # only the first run repacked
+    assert len(packs) == 1
 
 
 def test_the_head_is_sized_from_the_tokenizer_not_the_requested_vocab(monkeypatch, tmp_path):
@@ -262,5 +261,97 @@ def test_a_truncated_stamp_is_treated_as_a_cache_miss(monkeypatch, tmp_path):
 
     _run(monkeypatch, tmp_path, ["--iters", "1", "--device", "cpu"])
 
-    assert len(packs) == 2  # one repack, two halves
+    assert len(packs) == 1
     assert Config.load(data_dir / "config.json").corpus_chars == Config().corpus_chars
+
+
+def test_validation_is_opt_in_so_the_default_run_uses_the_whole_corpus(monkeypatch, tmp_path):
+    """Default eval_interval is 0. Holding out 5% of the corpus for a number
+    nothing reads would be a silent 5% tax on the deliverable."""
+    packs = _spy(monkeypatch, "pack_ids")
+
+    _run(monkeypatch, tmp_path, ["--iters", "1", "--device", "cpu"])
+
+    assert len(packs) == 1
+    assert not (tmp_path / "data" / "val.bin").exists()
+    assert not (tmp_path / "best.pt").exists()
+
+
+def test_asking_for_validation_holds_out_a_val_set_and_writes_best(monkeypatch, tmp_path):
+    packs = _spy(monkeypatch, "pack_ids")
+
+    _run(
+        monkeypatch,
+        tmp_path,
+        ["--iters", "1", "--device", "cpu", "--eval-interval", "1", "--best-out", str(tmp_path / "best.pt")],
+    )
+
+    assert len(packs) == 2
+    assert (tmp_path / "data" / "val.bin").exists()
+    best = torch.load(tmp_path / "best.pt", weights_only=True)
+    assert "val_loss" in best
+
+
+def test_toggling_validation_rebuilds_the_split_but_retuning_it_does_not(monkeypatch, tmp_path):
+    """The split changes train.bin, so turning eval on must repack. The eval
+    cadence does not touch the bytes, so changing only that must not retokenize."""
+    packs = _spy(monkeypatch, "pack_ids")
+    base = ["--iters", "1", "--device", "cpu"]
+
+    _run(monkeypatch, tmp_path, [*base, "--eval-interval", "5"])
+    assert len(packs) == 2  # train + val
+
+    _run(monkeypatch, tmp_path, [*base, "--eval-interval", "9"])
+    assert len(packs) == 2  # cadence only, cache still valid
+
+    _run(monkeypatch, tmp_path, [*base, "--eval-interval", "0"])
+    assert len(packs) == 3  # dropping the split changes train.bin
+
+
+def test_a_resume_does_not_overwrite_a_better_best_checkpoint(monkeypatch, tmp_path):
+    """Regression: `best_val` was reset to None on resume, so the first eval of
+    the second run overwrote `best.pt` unconditionally - even when the resumed
+    model was worse, which is exactly when the old best is worth keeping.
+
+    Driving this from loss dynamics is flaky, so the previous run's best is
+    set to an implausibly good score directly. Any real eval must lose to it.
+    """
+    best_out = str(tmp_path / "best.pt")
+    first = ["--device", "cpu", "--eval-interval", "2", "--best-out", best_out]
+
+    _run(monkeypatch, tmp_path, [*first, "--iters", "8"])
+    before = torch.load(best_out, weights_only=True)
+
+    # Stand in for a previous run whose best was excellent. Zero is unbeatable,
+    # so the guard is exercised without depending on loss dynamics.
+    previous = torch.load(tmp_path / "m.pt", weights_only=True)
+    previous["best_val"] = 0.0
+    previous["best_step"] = before["step"]
+    torch.save(previous, tmp_path / "m.pt")
+
+    _run(monkeypatch, tmp_path, [*first, "--iters", "24", "--resume"])
+
+    # The resumed run can never beat 0.0, so best.pt must come through intact
+    # rather than being replaced by whatever the first post-resume eval found.
+    after = torch.load(best_out, weights_only=True)
+    assert after["val_loss"] == pytest.approx(before["val_loss"])
+    assert after["step"] == before["step"]
+
+    # and the knowledge travels in the final checkpoint, not just in memory
+    resumed = torch.load(tmp_path / "m.pt", weights_only=True)
+    assert resumed["best_val"] == pytest.approx(0.0)
+    assert resumed["best_step"] == before["step"]
+
+
+def test_turning_validation_on_at_resume_warns_the_number_is_contaminated(monkeypatch, tmp_path, capsys):
+    """The val tail was in the training data up to the resume point, so its
+    loss is not a held-out score and saying so beats a quietly wrong number."""
+    _run(monkeypatch, tmp_path, ["--iters", "4", "--device", "cpu"])
+
+    _run(
+        monkeypatch,
+        tmp_path,
+        ["--iters", "8", "--device", "cpu", "--eval-interval", "2", "--resume"],
+    )
+
+    assert "contaminated" in capsys.readouterr().out

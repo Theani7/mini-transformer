@@ -27,9 +27,9 @@ class Config:
     beta1: float = 0.9
     beta2: float = 0.95
     grad_clip: float = 1.0
-    # validation
+    # validation (opt-in: --eval-interval 0 keeps the whole corpus for training)
     val_fraction: float = 0.05
-    eval_interval: int = 250
+    eval_interval: int = 0
     # bookkeeping
     seed: int = 42
     sample_interval: int = 1000

@@ -14,7 +14,6 @@ from .model import MiniTransformer
 from .tokenizer import EOT, decode, encode, load_tokenizer, train_tokenizer
 
 CACHE_KEY = (
-    "val_fraction",
     "dataset",
     "dataset_config",
     "corpus_chars",
@@ -102,8 +101,19 @@ def parse_args(argv=None):
     p.add_argument("--batch-size", type=int, default=defaults.batch_size)
     p.add_argument("--lr", type=float, default=defaults.lr)
     p.add_argument("--device", default="auto")
-    p.add_argument("--val-fraction", type=float, default=defaults.val_fraction)
-    p.add_argument("--eval-interval", type=int, default=defaults.eval_interval)
+    p.add_argument(
+        "--val-fraction",
+        type=float,
+        default=defaults.val_fraction,
+        help="fraction of tokens held out (only used when --eval-interval > 0)",
+    )
+    p.add_argument(
+        "--eval-interval",
+        type=int,
+        default=defaults.eval_interval,
+        help="steps between validation evals; 0 (default) disables validation "
+        "and trains on the whole corpus",
+    )
     p.add_argument("--data-dir", default="data")
     p.add_argument("--out", default="checkpoints/model.pt")
     p.add_argument("--best-out", default="checkpoints/best.pt")
@@ -143,34 +153,45 @@ def main(argv=None):
     except (TypeError, ValueError):
         stamp = None
 
+    needs_val = bool(config.eval_interval)
     stale = stamp is None or _cache_key(stamp) != _cache_key(config)
     if (
         stale
         or not tokenizer_path.exists()
         or not train_path.exists()
-        or not val_path.exists()
+        or (needs_val and not val_path.exists())
     ):
-        text = load_corpus(config.dataset, config.dataset_config, config.corpus_chars)
-        train_tokenizer([text], config.bpe_vocab_size, tokenizer_path)
-        tokenizer = load_tokenizer(tokenizer_path)
+            text = load_corpus(
+                config.dataset, config.dataset_config, config.corpus_chars
+            )
+            train_tokenizer([text], config.bpe_vocab_size, tokenizer_path)
+            tokenizer = load_tokenizer(tokenizer_path)
 
-        ids = np.array(encode(tokenizer, text), dtype=np.uint16)
-        train_ids, val_ids = split_ids(
-            ids, config.val_fraction, config.block_size
-        )
+            ids = np.array(encode(tokenizer, text), dtype=np.uint16)
+            if config.eval_interval:
+                # Only hold out a val set if something will score it. With eval
+                # off, discarding 5% of the corpus buys nothing.
+                train_ids, val_ids = split_ids(
+                    ids, config.val_fraction, config.block_size
+                )
+                n_train = pack_ids(train_ids, train_path)
+                n_val = pack_ids(val_ids, val_path)
+                packed = f"packed {n_train:,} train / {n_val:,} val tokens"
+            else:
+                n_train = pack_ids(ids, train_path)
+                packed = f"packed {n_train:,} train tokens (no val split)"
 
-        n_train = pack_ids(train_ids, train_path)
-        n_val = pack_ids(val_ids, val_path)
-
-        config.save(stamp_path)
-        print(f"packed {n_train:,} train / {n_val:,} val tokens")
+            config.save(stamp_path)
+            print(packed)
 
     tokenizer = load_tokenizer(tokenizer_path)
     vocab_size = tokenizer.get_vocab_size()
     print(f"tokenizer: {vocab_size} tokens (requested {config.bpe_vocab_size})")
 
     data = load_packed(train_path, config.block_size)
-    val_data = load_packed(val_path, config.block_size)
+    val_data = (
+        load_packed(val_path, config.block_size) if config.eval_interval else None
+    )
 
     model = MiniTransformer(vocab_size=vocab_size, config=config)
     init_weights(model, config.n_layer)
@@ -199,8 +220,17 @@ def main(argv=None):
         # `iters` is ignored because raising it is what `--resume` is for; every
         # other field silently changing mid-run is the bug this closes.
         resolve_checkpoint_config(
-            state.get("config"), config, out_path, ignore={"iters"}
+            state.get("config"),
+            config,
+            out_path,
+            ignore={"iters", "eval_interval"},
         )
+        if config.eval_interval and not state["config"].get("eval_interval"):
+            print(
+                "warning: validation turned on for a resume, but the val tail "
+                "was in the training data up to this step - the number is "
+                "contaminated, not a held-out score"
+            )
         try:
             model.load_state_dict(state["model"])
         except RuntimeError as exc:
@@ -212,17 +242,22 @@ def main(argv=None):
     generator = torch.Generator().manual_seed(config.seed)
 
     print(f"device={device} params={sum(p.numel() for p in model.parameters()):,}")
-    print("iter      elapsed     train      val   best")
+    print("iter      elapsed     train      val   best" if config.eval_interval
+          else "iter      elapsed     train")
 
     started = time.perf_counter()
     completed = start
     val_loss = None
-    best_val = None
-    best_step = start
+    # Restored, not reset. Without this a resume starts with `best_val = None`,
+    # so the first eval unconditionally overwrites a better `best.pt` that the
+    # previous run already wrote - the selection is silently destroyed.
+    best_val = state.get("best_val") if state else None
+    best_step = state.get("best_step", start) if state else start
     best_path = Path(args.best_out)
-    # The first eval fires inside the loop, before the final save creates the
-    # directory, so the parent has to exist up front.
-    best_path.parent.mkdir(parents=True, exist_ok=True)
+    if config.eval_interval:
+        # The first eval fires inside the loop, before the final save creates
+        # the directory, so the parent has to exist up front.
+        best_path.parent.mkdir(parents=True, exist_ok=True)
 
     for step in range(start, config.iters):
         for group in optimizer.param_groups:
@@ -245,19 +280,16 @@ def main(argv=None):
         if step % 100 == 0:
             elapsed = time.perf_counter() - started
             val_text = f"{val_loss:>8.3f}" if val_loss is not None else " " * 8
-            best_text = f"{best_val:>7.3f}" if best_val is not None else " " * 7
+            best_text = (
+                f"{best_val:>7.3f}" if config.eval_interval and best_val is not None else " " * 7
+            )
             print(
                 f"{step:>6}  {elapsed:>7.1f}s  {loss.item():>8.3f}"
                 f"{val_text}{best_text}",
                 flush=True,
             )
 
-        if (
-            config.eval_interval
-            and step
-            and step % config.eval_interval == 0
-            and step >= start
-        ):
+        if needs_val and step and step % config.eval_interval == 0:
             val_loss = evaluate(
                 model, val_data, config.batch_size, config.block_size, device
             )
@@ -277,7 +309,7 @@ def main(argv=None):
         if config.sample_interval and step and step % config.sample_interval == 0:
             print(_sample(model, tokenizer, config, device, ""))
 
-    if config.eval_interval and best_val is None:
+    if needs_val and best_val is None:
         val_loss = evaluate(
             model, val_data, config.batch_size, config.block_size, device
         )
@@ -293,15 +325,35 @@ def main(argv=None):
         )
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save({"model": model.state_dict(), "step": completed, "config": config.__dict__}, out_path)
+    torch.save(
+        {
+            "model": model.state_dict(),
+            "step": completed,
+            "config": config.__dict__,
+            # Carried so a later --resume knows what best already means.
+            "best_val": best_val,
+            "best_step": best_step,
+        },
+        out_path,
+    )
     print(f"\nsaved {out_path}")
 
     if best_val is not None:
-        print(f"best val {best_val:.3f} at step {best_step} -> {best_path}")
+        source = "best" if config.eval_interval else "best (from the resumed run)"
+        print(
+            f"{source} val {best_val:.3f} at step {best_step} -> {best_path}"
+        )
 
 
 def _cache_key(config):
-    return tuple(getattr(config, field) for field in CACHE_KEY)
+    """Identity of the *packed bytes*, not of the run.
+
+    Whether a val set was held out changes what lands in `train.bin`, so the
+    stamp has to record that. The eval cadence does not touch the bytes, so
+    retuning `--eval-interval` must not cost a retokenize.
+    """
+    split = (config.val_fraction, True) if config.eval_interval else (None, False)
+    return tuple(getattr(config, field) for field in CACHE_KEY) + (split,)
 
 
 def _rope(config, device):
