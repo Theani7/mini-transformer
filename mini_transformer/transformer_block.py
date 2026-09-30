@@ -1,61 +1,36 @@
 import torch
 from torch import nn
 
-from .feed_forward import FeedForward
+from .feed_forward import SwiGLU
 from .multi_head_attention import MultiHeadAttention
+from .rmsnorm import RMSNorm
 
 
 class TransformerBlock(nn.Module):
-
-    def __init__(
-        self,
-        d_model,
-        num_heads,
-        d_ff
-    ):
+    def __init__(self, d_model, n_head, d_ff):
         super().__init__()
 
-        self.norm1 = nn.LayerNorm(d_model)
-        self.norm2 = nn.LayerNorm(d_model)
+        self.norm1 = RMSNorm(d_model)
+        self.attention = MultiHeadAttention(d_model=d_model, n_head=n_head)
+        self.norm2 = RMSNorm(d_model)
+        self.feed_forward = SwiGLU(d_model=d_model, d_ff=d_ff)
 
-        self.attention = MultiHeadAttention(
-            d_model=d_model,
-            num_heads=num_heads
-        )
-
-        self.feed_forward = FeedForward(
-            d_model=d_model,
-            d_ff=d_ff
-        )
-
-    def forward(self, x):
-
-        # Attention + residual
-        x = x + self.attention(
-            self.norm1(x)
-        )
-
-        # Feed-forward + residual
-        x = x + self.feed_forward(
-            self.norm2(x)
-        )
-
+    def forward(self, x, cos, sin):
+        x = x + self.attention(self.norm1(x), cos, sin)
+        x = x + self.feed_forward(self.norm2(x))
         return x
 
 
 if __name__ == "__main__":
 
+    from .rope import rope_cache
+
     torch.manual_seed(42)
 
-    x = torch.randn(1, 4, 8)
+    x = torch.randn(1, 16, 32)
+    cos, sin = rope_cache(16, 8)
 
-    block = TransformerBlock(
-        d_model=8,
-        num_heads=2,
-        d_ff=32
-    )
-
-    output = block(x)
+    block = TransformerBlock(d_model=32, n_head=4, d_ff=64)
 
     print("Input shape:", x.shape)
-    print("Output shape:", output.shape)
+    print("Output shape:", block(x, cos, sin).shape)
