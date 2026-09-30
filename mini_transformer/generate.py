@@ -135,8 +135,18 @@ def main(argv=None):
     print(decode(tokenizer, out[0].tolist()))
 
 
-if __name__ == "__main__":
+def cli():
+    """Entry point for the `mini-transformer` console script.
+
+    `main` raises `ValueError` for anything the user can fix (no checkpoint, wrong
+    vocabulary) and the `__main__` guard turns that into a one-line message. A console
+    script calls `main` directly, so it needs the same conversion.
+    """
     try:
         main()
     except ValueError as exc:
         sys.exit(str(exc))
+
+
+if __name__ == "__main__":
+    cli()

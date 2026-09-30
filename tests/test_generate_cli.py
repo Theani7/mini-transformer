@@ -1,8 +1,10 @@
+import sys
+
 import pytest
 import torch
 
 from mini_transformer.config import Config
-from mini_transformer.generate import load_checkpoint, main
+from mini_transformer.generate import cli, load_checkpoint, main
 from mini_transformer.tokenizer import EOT, encode, load_tokenizer
 
 TEXT = "the quick brown fox jumps over the lazy dog. " * 200
@@ -135,6 +137,19 @@ def test_a_missing_tokenizer_names_the_path_instead_of_a_traceback(tmp_path):
                 "cpu",
             ]
         )
+
+
+def test_the_console_script_reports_a_missing_tokenizer_without_a_traceback(
+    tmp_path, monkeypatch
+):
+    """`mini-transformer` calls `cli`, not `main`, so the `ValueError` -> one-line
+    message conversion has to live in both or the console script dumps a traceback."""
+    monkeypatch.setattr(
+        sys, "argv", ["mini-transformer", "--tokenizer", str(tmp_path / "nope.json")]
+    )
+    with pytest.raises(SystemExit) as exit_info:
+        cli()
+    assert "nope.json not found - run:" in str(exit_info.value)
 
 
 def _cli(tmp_path):

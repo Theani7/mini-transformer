@@ -1,7 +1,7 @@
 [project]
 name = "mini-transformer"
-version = "0.1.0"
-description = "A character-level Transformer implemented from scratch in PyTorch."
+version = "0.2.0"
+description = "A BPE-tokenized Transformer language model implemented from scratch in PyTorch."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -39,7 +39,7 @@ Repository = "https://github.com/Theani7/mini-transformer"
 Issues = "https://github.com/Theani7/mini-transformer/issues"
 
 [project.scripts]
-mini-transformer = "mini_transformer:main"
+mini-transformer = "mini_transformer.generate:cli"
 
 [build-system]
 requires = ["uv_build>=0.12.13,<0.13.0"]
