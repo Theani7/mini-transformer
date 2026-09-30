@@ -1,7 +1,9 @@
 import pytest
 import torch
+import torch.nn.functional as F
 
 from mini_transformer.feed_forward import SwiGLU
+from mini_transformer.multi_head_attention import MultiHeadAttention
 from mini_transformer.rmsnorm import RMSNorm
 from mini_transformer.rope import apply_rope, rope_cache, rotate_half
 
@@ -111,9 +113,6 @@ def test_swiglu_shape_gating_and_no_projection_biases():
     assert torch.allclose(ffn(x), torch.zeros(2, 3, 16))
 
 
-from mini_transformer.multi_head_attention import MultiHeadAttention
-
-
 def _attention(block_size=16, d_model=32, n_head=4):
     torch.manual_seed(0)
     attn = MultiHeadAttention(d_model=d_model, n_head=n_head)
@@ -146,13 +145,42 @@ def test_attention_rejects_indivisible_head_count():
         MultiHeadAttention(d_model=30, n_head=4)
 
 
-def test_apply_rope_rejects_wrong_rank_input():
+def test_attention_rots_q_and_k_but_not_v():
+    """Recompute the intended wiring from the module's own qkv weights.
+
+    Every other attention test is invariant to which of q/k/v gets rotated, and
+    to the argument order handed to sdpa, so this is the only thing pinning it.
+    """
+    attn, cos, sin = _attention()
+    x = torch.randn(2, 16, 32)
+    batch_size, seq_len, d_model = x.shape
+    cos, sin = cos[:, :, :seq_len], sin[:, :, :seq_len]
+
+    def split(t):
+        return t.view(batch_size, seq_len, attn.n_head, attn.head_dim).transpose(1, 2)
+
+    q, k, v = (split(t) for t in attn.qkv(x).split(d_model, dim=2))
+
+    expected = F.scaled_dot_product_attention(
+        apply_rope(q, cos, sin),
+        apply_rope(k, cos, sin),
+        v,
+        is_causal=True,
+    )
+    expected = attn.proj(
+        expected.transpose(1, 2).contiguous().view(batch_size, seq_len, d_model)
+    )
+
+    assert torch.allclose(attn(x, cos, sin), expected, atol=1e-6)
+
+
+def test_apply_rope_rejects_non_4d_input():
+    cos, sin = rope_cache(8, 8)
+    with pytest.raises(ValueError, match="batch, heads, seq, head_dim"):
+        apply_rope(torch.randn(2, 8, 8), cos, sin)
+
+
+def test_apply_rope_rejects_mismatched_head_dim():
     cos, sin = rope_cache(8, 8)
     with pytest.raises(ValueError, match="head_dim"):
-        apply_rope(torch.randn(2, 8, 16), cos, sin)
-
-
-def test_apply_rope_leaves_4d_path_unchanged():
-    cos, sin = rope_cache(8, 8)
-    x = torch.randn(2, 4, 8, 8)
-    assert torch.equal(apply_rope(x, cos, sin), x * cos + rotate_half(x) * sin)
+        apply_rope(torch.randn(2, 4, 8, 16), cos, sin)
