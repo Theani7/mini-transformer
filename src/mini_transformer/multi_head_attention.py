@@ -1,6 +1,6 @@
 import torch
-import torch.nn as nn
 import torch.nn.functional as F
+from torch import nn
 
 
 class MultiHeadAttention(nn.Module):
@@ -98,16 +98,18 @@ class MultiHeadAttention(nn.Module):
 
 # Experiment
 
-torch.manual_seed(42)
+if __name__ == "__main__":
 
-x = torch.randn(1, 4, 8)
+    torch.manual_seed(42)
 
-attention = MultiHeadAttention(
-    d_model=8,
-    num_heads=2
-)
+    x = torch.randn(1, 4, 8)
 
-output = attention(x)
+    attention = MultiHeadAttention(
+        d_model=8,
+        num_heads=2
+    )
 
-print("Input shape:", x.shape)
-print("Output shape:", output.shape)
+    output = attention(x)
+
+    print("Input shape:", x.shape)
+    print("Output shape:", output.shape)

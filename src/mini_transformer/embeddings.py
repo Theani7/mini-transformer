@@ -1,20 +1,22 @@
 import torch
-import torch.nn as nn
+from torch import nn
 
-vocab_size =8
-embedding_dim = 4
+if __name__ == "__main__":
 
-embedding = nn.Embedding(vocab_size,embedding_dim)
+    vocab_size = 8
+    embedding_dim = 4
 
-tokens = torch.tensor([3,2,4,4,5])
+    embedding = nn.Embedding(vocab_size, embedding_dim)
 
-vectors = embedding(tokens)
+    tokens = torch.tensor([3, 2, 4, 4, 5])
 
-print("Tokens:")
-print(tokens)
+    vectors = embedding(tokens)
 
-print("\n Embeddings")
-print(embedding)
+    print("Tokens:")
+    print(tokens)
 
-print("\n Shape:")
-print(vectors.shape)
+    print("\n Embeddings")
+    print(embedding)
+
+    print("\n Shape:")
+    print(vectors.shape)

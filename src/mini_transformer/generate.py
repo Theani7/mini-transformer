@@ -1,49 +1,51 @@
 import torch
 
-from src.model import MiniTransformer
+from .model import MiniTransformer
 
 
-text = "hello world"
+if __name__ == "__main__":
 
-chars = sorted(set(text))
+    text = "hello world"
 
-stoi = {ch: i for i, ch in enumerate(chars)}
-itos = {i: ch for ch, i in stoi.items()}
+    chars = sorted(set(text))
 
-
-def encode(text):
-    return [stoi[ch] for ch in text]
+    stoi = {ch: i for i, ch in enumerate(chars)}
+    itos = {i: ch for ch, i in stoi.items()}
 
 
-def decode(ids):
-    return "".join(itos[i] for i in ids)
+    def encode(text):
+        return [stoi[ch] for ch in text]
 
 
-vocab_size = len(chars)
+    def decode(ids):
+        return "".join(itos[i] for i in ids)
 
-model = MiniTransformer(
-    vocab_size=vocab_size,
-    d_model=32,
-    num_heads=4,
-    d_ff=128,
-    num_layers=2,
-    max_seq_len=64,
-)
 
-# TODO: load trained parameters here
+    vocab_size = len(chars)
 
-model.eval()
+    model = MiniTransformer(
+        vocab_size=vocab_size,
+        d_model=32,
+        num_heads=4,
+        d_ff=128,
+        num_layers=2,
+        max_seq_len=64,
+    )
 
-prompt = "h"
+    # TODO: load trained parameters here
 
-tokens = torch.tensor(
-    [encode(prompt)],
-    dtype=torch.long,
-)
+    model.eval()
 
-generated = model.generate(
-    tokens,
-    max_new_tokens=10,
-)
+    prompt = "h"
 
-print(decode(generated[0].tolist()))
+    tokens = torch.tensor(
+        [encode(prompt)],
+        dtype=torch.long,
+    )
+
+    generated = model.generate(
+        tokens,
+        max_new_tokens=10,
+    )
+
+    print(decode(generated[0].tolist()))

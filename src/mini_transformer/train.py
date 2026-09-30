@@ -1,7 +1,7 @@
 import torch
 import torch.nn.functional as F
 
-from model import MiniTransformer
+from .model import MiniTransformer
 
 
 # --------------------------------------------------
@@ -82,34 +82,36 @@ optimizer = torch.optim.AdamW(
 # 4. Training
 # --------------------------------------------------
 
-for step in range(1000):
+if __name__ == "__main__":
 
-    # Forward pass
+    for step in range(1000):
 
-    logits = model(x)
+        # Forward pass
 
-    # Calculate loss
+        logits = model(x)
 
-    loss = F.cross_entropy(
-        logits.view(-1, vocab_size),
-        y.view(-1)
-    )
+        # Calculate loss
 
-    # Clear old gradients
-
-    optimizer.zero_grad()
-
-    # Backpropagation
-
-    loss.backward()
-
-    # Update parameters
-
-    optimizer.step()
-
-    if step % 100 == 0:
-
-        print(
-            f"step {step:4d} | "
-            f"loss {loss.item():.4f}"
+        loss = F.cross_entropy(
+            logits.view(-1, vocab_size),
+            y.view(-1)
         )
+
+        # Clear old gradients
+
+        optimizer.zero_grad()
+
+        # Backpropagation
+
+        loss.backward()
+
+        # Update parameters
+
+        optimizer.step()
+
+        if step % 100 == 0:
+
+            print(
+                f"step {step:4d} | "
+                f"loss {loss.item():.4f}"
+            )
