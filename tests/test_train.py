@@ -120,14 +120,20 @@ def test_main_applies_the_schedule_to_every_param_group(monkeypatch, tmp_path):
     assert seen == [[pytest.approx(lr_at(c, s))] * 2 for s in range(5)]
 
 
-def test_resume_never_downgrades_a_finished_checkpoint(monkeypatch, tmp_path):
+def test_resume_never_downgrades_a_finished_checkpoint(monkeypatch, tmp_path, capsys):
     out = tmp_path / "m.pt"
+    built = _spy(monkeypatch, "build_optimizer")
 
     _run(monkeypatch, tmp_path, ["--iters", "5", "--device", "cpu"])
     assert torch.load(out, weights_only=True)["step"] == 5
 
+    capsys.readouterr()
+    built.clear()
     _run(monkeypatch, tmp_path, ["--iters", "3", "--device", "cpu", "--resume"])
+
     assert torch.load(out, weights_only=True)["step"] == 5
+    assert built == []
+    assert "nothing to do" in capsys.readouterr().out
 
 
 def test_stale_cache_is_retrained_when_the_corpus_changes(monkeypatch, tmp_path):
