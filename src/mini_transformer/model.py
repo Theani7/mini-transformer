@@ -1,5 +1,5 @@
 import torch
-import torch.nn as nn
+from torch import nn
 
 from .transformer_block import TransformerBlock
 
@@ -16,6 +16,8 @@ class MiniTransformer(nn.Module):
         max_seq_len
     ):
         super().__init__()
+
+        self.max_seq_len = max_seq_len
 
         self.token_embedding = nn.Embedding(
             vocab_size,
@@ -45,7 +47,7 @@ class MiniTransformer(nn.Module):
 
     def forward(self, tokens):
 
-        batch_size, seq_len = tokens.shape
+        _, seq_len = tokens.shape
 
         positions = torch.arange(
             seq_len,
@@ -68,6 +70,45 @@ class MiniTransformer(nn.Module):
         logits = self.lm_head(x)
 
         return logits
+
+    # ponytail: no KV cache, re-runs the whole window each step (O(n^2));
+    # add per-layer key/value caching if generation gets long.
+
+    @torch.no_grad()
+    def generate(
+        self,
+        tokens,
+        max_new_tokens,
+        temperature=0.0
+    ):
+
+        for _ in range(max_new_tokens):
+
+            window = tokens[:, -self.max_seq_len:]
+
+            logits = self(window)[:, -1, :]
+
+            if temperature == 0:
+                next_token = logits.argmax(
+                    dim=-1,
+                    keepdim=True
+                )
+            else:
+                probs = torch.softmax(
+                    logits / temperature,
+                    dim=-1
+                )
+                next_token = torch.multinomial(
+                    probs,
+                    num_samples=1
+                )
+
+            tokens = torch.cat(
+                [tokens, next_token],
+                dim=1
+            )
+
+        return tokens
 
 
 if __name__ == "__main__":
