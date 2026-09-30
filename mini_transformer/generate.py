@@ -98,8 +98,18 @@ def load_checkpoint(path, device, vocab_size, config=None):
 
 def main(argv=None):
     p = argparse.ArgumentParser(description="Sample from a trained checkpoint")
-    p.add_argument("--checkpoint", default="checkpoints/model.pt")
-    p.add_argument("--tokenizer", default="data/tokenizer.json")
+    default_ckpt = (
+        "checkpoints/model.safetensors"
+        if Path("checkpoints/model.safetensors").exists()
+        else "checkpoints/model.pt"
+    )
+    default_tok = (
+        "checkpoints/tokenizer.json"
+        if Path("checkpoints/tokenizer.json").exists()
+        else "data/tokenizer.json"
+    )
+    p.add_argument("--checkpoint", default=default_ckpt)
+    p.add_argument("--tokenizer", default=default_tok)
     p.add_argument("--prompt", default="The ")
     p.add_argument("--n", type=int, default=200)
     p.add_argument(

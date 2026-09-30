@@ -5,5 +5,4 @@ dist/
 .superpowers/
 docs/superpowers/
 data/
-checkpoints/
-*.safetensors
+checkpoints/best.*
