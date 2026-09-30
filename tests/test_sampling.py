@@ -49,3 +49,23 @@ def test_top_p_truncates_the_tail():
     logits = torch.tensor([[4.0, 3.0, 2.0, 0.0]])  # strictly decreasing: no tie ambiguity
     seen = {sample_next(logits, temperature=1.0, top_p=0.75).item() for _ in range(50)}
     assert seen == {0, 1}
+
+
+def test_top_k_restricts_to_top_candidates():
+    torch.manual_seed(0)
+    logits = torch.tensor([[10.0, 9.0, 8.0, 7.0, 6.0]])
+    seen = {sample_next(logits, temperature=1.0, top_k=2).item() for _ in range(30)}
+    assert seen == {0, 1}
+
+
+def test_repetition_penalty_depresses_seen_tokens():
+    logits = torch.tensor([[5.0, 4.0]])
+    context = torch.tensor([[0]])
+    # Token 0 is preferred (5.0 > 4.0). With penalty 2.0, 5.0 / 2.0 = 2.5 < 4.0, so token 1 wins.
+    out = sample_next(
+        logits,
+        temperature=0.0,
+        repetition_penalty=2.0,
+        context=context,
+    )
+    assert out.item() == 1

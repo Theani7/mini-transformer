@@ -62,7 +62,10 @@ class MiniTransformer(nn.Module):
         config=None,
         temperature=1.0,
         top_p=1.0,
+        top_k=0,
+        repetition_penalty=1.0,
         use_cache=False,
+        on_token=None,
     ):
         # Measured on the 3.03M model: 1.68 ms/token uncached vs 1.85 cached over
         # 300 tokens on MPS. Decode at this scale is dominated by fixed per-step
@@ -83,9 +86,18 @@ class MiniTransformer(nn.Module):
 
         for _ in range(max_new_tokens):
             logits = self(window, cos, sin, cache)[:, -1, :]
-            next_token = sample_next(logits, temperature=temperature, top_p=top_p)
+            next_token = sample_next(
+                logits,
+                temperature=temperature,
+                top_p=top_p,
+                top_k=top_k,
+                repetition_penalty=repetition_penalty,
+                context=tokens,
+            )
             tokens = torch.cat([tokens, next_token], dim=1)
-            window = next_token
+            window = next_token if use_cache else tokens[:, -config.block_size :]
+            if on_token is not None:
+                on_token(next_token)
 
         return tokens
 

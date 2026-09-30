@@ -71,7 +71,38 @@ def main(argv=None):
         default=0.95,
         help="nucleus cutoff; 1.0 keeps the whole distribution",
     )
+    p.add_argument(
+        "--top-k",
+        type=int,
+        default=0,
+        help="top-k cutoff; 0 disables",
+    )
+    p.add_argument(
+        "--repetition-penalty",
+        type=float,
+        default=1.0,
+        help="penalty for repeating tokens (> 1.0 penalizes)",
+    )
     p.add_argument("--device", default="auto")
+    p.add_argument(
+        "--use-cache",
+        action="store_true",
+        default=False,
+        help="use KV-cache during generation for fast autoregressive decode",
+    )
+    p.add_argument(
+        "--stream",
+        action="store_true",
+        default=False,
+        help="stream tokens to stdout as they are generated",
+    )
+    p.add_argument(
+        "-i",
+        "--interactive",
+        action="store_true",
+        default=False,
+        help="run in an interactive prompt loop",
+    )
     args = p.parse_args(argv)
 
     device = resolve_device(args.device)
@@ -86,37 +117,75 @@ def main(argv=None):
 
     model, config = load_checkpoint(args.checkpoint, device, vocab_size)
 
-    ids = encode(tokenizer, args.prompt)
-    if not args.prompt.strip():
+    def generate_single_prompt(prompt_text, stream=args.stream):
+        ids = encode(tokenizer, prompt_text)
+        if not prompt_text.strip():
+            print(
+                f"blank prompt: seeding with {EOT} and sampling unconditionally",
+                file=sys.stderr,
+            )
+            ids = [tokenizer.token_to_id(EOT)]
+
+        if len(ids) > config.block_size:
+            print(
+                f"warning: prompt is {len(ids)} tokens; only the last "
+                f"{config.block_size} reach the model",
+                file=sys.stderr,
+            )
+
+        tokens = torch.tensor([ids], dtype=torch.long, device=device)
+
+        if stream:
+            if prompt_text.strip():
+                print(prompt_text, end="", flush=True)
+
+            def stream_token(token_tensor):
+                print(decode(tokenizer, token_tensor[0].tolist()), end="", flush=True)
+
+            out = model.generate(
+                tokens,
+                max_new_tokens=args.n,
+                config=config,
+                temperature=args.temperature,
+                top_p=args.top_p,
+                top_k=args.top_k,
+                repetition_penalty=args.repetition_penalty,
+                use_cache=args.use_cache,
+                on_token=stream_token,
+            )
+            print()
+        else:
+            out = model.generate(
+                tokens,
+                max_new_tokens=args.n,
+                config=config,
+                temperature=args.temperature,
+                top_p=args.top_p,
+                top_k=args.top_k,
+                repetition_penalty=args.repetition_penalty,
+                use_cache=args.use_cache,
+            )
+            print(decode(tokenizer, out[0].tolist()))
+
+    if args.interactive:
+        print("MiniTransformer interactive mode (Ctrl+C or 'exit' to quit)\n")
+        while True:
+            try:
+                user_prompt = input("Prompt: ")
+            except (EOFError, KeyboardInterrupt):
+                print()
+                break
+            if user_prompt.strip() in {"exit", "quit"}:
+                break
+            generate_single_prompt(user_prompt, stream=True)
+            print()
+    else:
         print(
-            f"blank prompt: seeding with {EOT} and sampling unconditionally",
+            f"device={device} vocab={vocab_size} block_size={config.block_size} "
+            f"temperature={args.temperature} top_p={args.top_p} n={args.n}",
             file=sys.stderr,
         )
-        ids = [tokenizer.token_to_id(EOT)]
-
-    if len(ids) > config.block_size:
-        print(
-            f"warning: prompt is {len(ids)} tokens; only the last "
-            f"{config.block_size} reach the model",
-            file=sys.stderr,
-        )
-
-    print(
-        f"device={device} vocab={vocab_size} block_size={config.block_size} "
-        f"temperature={args.temperature} top_p={args.top_p} n={args.n}",
-        file=sys.stderr,
-    )
-
-    tokens = torch.tensor([ids], dtype=torch.long, device=device)
-    out = model.generate(
-        tokens,
-        max_new_tokens=args.n,
-        config=config,
-        temperature=args.temperature,
-        top_p=args.top_p,
-    )
-
-    print(decode(tokenizer, out[0].tolist()))
+        generate_single_prompt(args.prompt, stream=args.stream)
 
 
 def cli():

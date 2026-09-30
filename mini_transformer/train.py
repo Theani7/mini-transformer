@@ -24,6 +24,8 @@ CACHE_KEY = (
 def resolve_device(requested):
     if requested != "auto":
         return requested
+    if torch.cuda.is_available():
+        return "cuda"
     return "mps" if torch.backends.mps.is_available() else "cpu"
 
 
@@ -115,6 +117,12 @@ def parse_args(argv=None):
         "and trains on the whole corpus",
     )
     p.add_argument("--data-dir", default="data")
+    p.add_argument(
+        "--early-stopping-patience",
+        type=int,
+        default=0,
+        help="stop if val loss fails to improve for N consecutive evals; 0 disables",
+    )
     p.add_argument("--out", default="checkpoints/model.pt")
     p.add_argument("--best-out", default="checkpoints/best.pt")
     p.add_argument("--resume", action="store_true")
@@ -239,6 +247,11 @@ def main(argv=None):
             ) from exc
 
     optimizer = build_optimizer(model, config)
+    if state is not None and "optimizer" in state:
+        try:
+            optimizer.load_state_dict(state["optimizer"])
+        except (ValueError, KeyError, RuntimeError) as exc:
+            print(f"warning: could not restore optimizer state: {exc}")
     generator = torch.Generator().manual_seed(config.seed)
 
     print(f"device={device} params={sum(p.numel() for p in model.parameters()):,}")
@@ -259,6 +272,7 @@ def main(argv=None):
         # the directory, so the parent has to exist up front.
         best_path.parent.mkdir(parents=True, exist_ok=True)
 
+    patience_counter = 0
     for step in range(start, config.iters):
         for group in optimizer.param_groups:
             group["lr"] = lr_at(config, step)
@@ -296,6 +310,7 @@ def main(argv=None):
             if best_val is None or val_loss < best_val:
                 best_val = val_loss
                 best_step = completed
+                patience_counter = 0
                 torch.save(
                     {
                         "model": model.state_dict(),
@@ -305,6 +320,17 @@ def main(argv=None):
                     },
                     best_path,
                 )
+            else:
+                patience_counter += 1
+                if (
+                    args.early_stopping_patience
+                    and patience_counter >= args.early_stopping_patience
+                ):
+                    print(
+                        f"early stopping at step {completed}: val loss failed to improve "
+                        f"for {patience_counter} consecutive evals"
+                    )
+                    break
 
         if config.sample_interval and step and step % config.sample_interval == 0:
             print(_sample(model, tokenizer, config, device, ""))
@@ -328,6 +354,7 @@ def main(argv=None):
     torch.save(
         {
             "model": model.state_dict(),
+            "optimizer": optimizer.state_dict(),
             "step": completed,
             "config": config.__dict__,
             # Carried so a later --resume knows what best already means.

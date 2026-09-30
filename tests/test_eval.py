@@ -113,3 +113,69 @@ def test_evaluate_is_a_token_mean_not_a_sum_per_window():
 
     assert got == pytest.approx(total / (windows * block_size), rel=1e-5)
     assert got < 8.0
+
+
+def test_eval_cli_on_packed_data(tmp_path, capsys):
+    from mini_transformer.config import Config
+    from mini_transformer.data import pack_ids
+    from mini_transformer.eval import main
+    from mini_transformer.init import init_weights
+    from mini_transformer.model import MiniTransformer
+    from mini_transformer.tokenizer import load_tokenizer, train_tokenizer
+
+    config = Config(block_size=16)
+    text = "the quick brown fox jumps over the lazy dog. " * 20
+    tok_path = tmp_path / "tokenizer.json"
+    train_tokenizer([text], 300, tok_path)
+    vocab_size = load_tokenizer(tok_path).get_vocab_size()
+
+    # Save dummy model with matching vocab_size
+    model = MiniTransformer(vocab_size=vocab_size, config=config).eval()
+    init_weights(model, config.n_layer)
+    ckpt_path = tmp_path / "model.pt"
+    torch.save({"model": model.state_dict(), "step": 1, "config": config.__dict__}, ckpt_path)
+
+    data_path = tmp_path / "val.bin"
+    pack_ids(np.arange(100, dtype=np.uint16) % vocab_size, data_path)
+
+    loss, ppl = main([
+        "--checkpoint", str(ckpt_path),
+        "--tokenizer", str(tok_path),
+        "--data", str(data_path),
+        "--device", "cpu",
+    ])
+    assert loss > 0
+    assert ppl > 1
+    assert "ppl:" in capsys.readouterr().out
+
+
+def test_eval_cli_on_text_file(tmp_path, capsys):
+    from mini_transformer.config import Config
+    from mini_transformer.eval import main
+    from mini_transformer.init import init_weights
+    from mini_transformer.model import MiniTransformer
+    from mini_transformer.tokenizer import load_tokenizer, train_tokenizer
+
+    config = Config(block_size=16)
+    text = "the quick brown fox jumps over the lazy dog. " * 20
+    tok_path = tmp_path / "tokenizer.json"
+    train_tokenizer([text], 300, tok_path)
+    vocab_size = load_tokenizer(tok_path).get_vocab_size()
+
+    model = MiniTransformer(vocab_size=vocab_size, config=config).eval()
+    init_weights(model, config.n_layer)
+    ckpt_path = tmp_path / "model.pt"
+    torch.save({"model": model.state_dict(), "step": 1, "config": config.__dict__}, ckpt_path)
+
+    txt_file = tmp_path / "sample.txt"
+    txt_file.write_text(text)
+
+    loss, ppl = main([
+        "--checkpoint", str(ckpt_path),
+        "--tokenizer", str(tok_path),
+        "--text-file", str(txt_file),
+        "--device", "cpu",
+    ])
+    assert loss > 0
+    assert ppl > 1
+    assert "ppl:" in capsys.readouterr().out

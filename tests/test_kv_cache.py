@@ -92,3 +92,18 @@ def test_no_cache_means_no_side_effects_and_unchanged_shapes():
     with torch.no_grad():
         assert model(tokens, cos, sin).shape == (2, 16, VOCAB)
         assert model(tokens, cos, sin, cache=None).shape == (2, 16, VOCAB)
+
+
+def test_uncached_generation_preserves_context_across_steps():
+    """Uncached generation used `window = next_token` which dropped all past context
+    from step 2 onward, turning generation into a 1-token Markov model. Plain and
+    cached generation must match on perturbed weights where argmax does not trivially loop."""
+    model = _model()
+    for p in model.parameters():
+        p.data.normal_(0, 0.5)
+
+    tokens = torch.randint(0, VOCAB, (1, 12))
+    cached = model.generate(tokens, 10, config=CONFIG, temperature=0.0, use_cache=True)
+    plain = model.generate(tokens, 10, config=CONFIG, temperature=0.0, use_cache=False)
+
+    assert torch.equal(cached, plain)

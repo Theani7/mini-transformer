@@ -359,3 +359,49 @@ def test_diagnostics_never_pollute_stdout(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "temperature=" not in out
     assert out.startswith("the ")
+
+
+def test_use_cache_flag_reaches_generate(tmp_path, monkeypatch):
+    seen = _spy_generate(monkeypatch)
+
+    main([*_cli(tmp_path), "--prompt", "the ", "--n", "1", "--use-cache"])
+
+    assert seen["use_cache"] is True
+
+
+def test_stream_flag_prints_output(tmp_path, capsys):
+    main([*_cli(tmp_path), "--prompt", "the ", "--n", "2", "--stream"])
+
+    out = capsys.readouterr().out
+    assert out.startswith("the ")
+
+
+def test_top_k_and_repetition_penalty_flags_reach_generate(tmp_path, monkeypatch):
+    seen = _spy_generate(monkeypatch)
+
+    main(
+        [
+            *_cli(tmp_path),
+            "--prompt",
+            "the ",
+            "--n",
+            "1",
+            "--top-k",
+            "5",
+            "--repetition-penalty",
+            "1.2",
+        ]
+    )
+
+    assert seen["top_k"] == 5
+    assert seen["repetition_penalty"] == 1.2
+
+
+def test_interactive_mode_runs_prompts_and_exits(tmp_path, monkeypatch, capsys):
+    inputs = iter(["hello", "exit"])
+    monkeypatch.setattr("builtins.input", lambda prompt="": next(inputs))
+
+    main([*_cli(tmp_path), "-i", "--n", "1"])
+
+    out = capsys.readouterr().out
+    assert "interactive mode" in out

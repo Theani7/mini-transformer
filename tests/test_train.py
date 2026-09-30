@@ -232,6 +232,21 @@ def test_resume_can_still_extend_a_run_to_a_higher_iters(monkeypatch, tmp_path):
     assert torch.load(tmp_path / "m.pt", weights_only=True)["step"] == 7
 
 
+def test_resume_restores_optimizer_state(monkeypatch, tmp_path):
+    """Regression: Checkpoints previously omitted `optimizer`, causing `--resume` to reset
+    AdamW momentum and variance moments to zero mid-training."""
+    _run(monkeypatch, tmp_path, ["--iters", "3", "--device", "cpu"])
+
+    state = torch.load(tmp_path / "m.pt", weights_only=True)
+    assert "optimizer" in state
+    assert len(state["optimizer"]["state"]) > 0
+
+    _run(monkeypatch, tmp_path, ["--iters", "5", "--device", "cpu", "--resume"])
+    state_after = torch.load(tmp_path / "m.pt", weights_only=True)
+    assert state_after["step"] == 5
+    assert "optimizer" in state_after
+
+
 def test_resume_reports_weights_that_do_not_fit_as_a_value_error(monkeypatch, tmp_path):
     """The identical call in `generate.py` is wrapped in a `ValueError`, which
     both CLIs turn into a one-line message. Bare here, `--resume` on a
@@ -355,3 +370,40 @@ def test_turning_validation_on_at_resume_warns_the_number_is_contaminated(monkey
     )
 
     assert "contaminated" in capsys.readouterr().out
+
+
+def test_resolve_device_picks_cuda_when_available(monkeypatch):
+    from mini_transformer.train import resolve_device
+
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: True)
+    assert resolve_device("auto") == "cuda"
+
+
+def test_early_stopping_halts_training_when_patience_exceeded(monkeypatch, tmp_path, capsys):
+    from mini_transformer import train
+
+    # Return increasing validation loss so patience is exhausted
+    eval_call_count = 0
+
+    def mock_eval(*args, **kwargs):
+        nonlocal eval_call_count
+        eval_call_count += 1
+        return float(eval_call_count)
+
+    monkeypatch.setattr(train, "evaluate", mock_eval)
+
+    _run(
+        monkeypatch,
+        tmp_path,
+        [
+            "--iters", "20",
+            "--device", "cpu",
+            "--eval-interval", "2",
+            "--early-stopping-patience", "2",
+        ],
+    )
+
+    out = capsys.readouterr().out
+    assert "early stopping" in out
+    state = torch.load(tmp_path / "m.pt", weights_only=True)
+    assert state["step"] < 20
