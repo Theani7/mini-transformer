@@ -421,3 +421,16 @@ def test_train_writes_safetensors_checkpoint(monkeypatch, tmp_path):
         meta = f.metadata() or {}
         assert "config" in meta
         assert "step" in meta
+
+
+def test_mixed_precision_flag_trains_successfully(monkeypatch, tmp_path, capsys):
+    _run(
+        monkeypatch,
+        tmp_path,
+        ["--iters", "2", "--device", "cpu", "--mixed-precision", "bf16"],
+    )
+
+    out = capsys.readouterr().out
+    assert "mixed_precision=bf16" in out
+    assert (tmp_path / "m.pt").exists()
+

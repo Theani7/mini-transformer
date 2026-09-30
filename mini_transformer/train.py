@@ -128,6 +128,12 @@ def parse_args(argv=None):
     p.add_argument("--out", default="checkpoints/model.pt")
     p.add_argument("--best-out", default="checkpoints/best.pt")
     p.add_argument("--resume", action="store_true")
+    p.add_argument(
+        "--mixed-precision",
+        choices=["no", "fp16", "bf16"],
+        default="no",
+        help="enable mixed precision training (no, fp16, bf16)",
+    )
     return p.parse_args(argv)
 
 
@@ -256,6 +262,16 @@ def main(argv=None):
             print(f"warning: could not restore optimizer state: {exc}")
     generator = torch.Generator().manual_seed(config.seed)
 
+    dev_type = device.type if isinstance(device, torch.device) else str(device)
+    amp_enabled = args.mixed_precision != "no" and dev_type in ("cuda", "cpu", "mps")
+    amp_dtype = (
+        torch.bfloat16
+        if args.mixed_precision == "bf16"
+        else (torch.float16 if args.mixed_precision == "fp16" else torch.float32)
+    )
+    if amp_enabled:
+        print(f"mixed_precision={args.mixed_precision} ({amp_dtype}) on {dev_type}")
+
     print(f"device={device} params={sum(p.numel() for p in model.parameters()):,}")
     print("iter      elapsed     train      val   best" if config.eval_interval
           else "iter      elapsed     train")
@@ -282,10 +298,11 @@ def main(argv=None):
         x, y = get_batch(
             data, config.batch_size, config.block_size, device, generator
         )
-        logits = model(x, *_rope(config, device))
-        loss = F.cross_entropy(
-            logits.view(-1, vocab_size), y.view(-1)
-        )
+        with torch.autocast(device_type=dev_type, dtype=amp_dtype, enabled=amp_enabled):
+            logits = model(x, *_rope(config, device))
+            loss = F.cross_entropy(
+                logits.view(-1, vocab_size), y.view(-1)
+            )
 
         optimizer.zero_grad()
         loss.backward()
@@ -393,8 +410,9 @@ def main(argv=None):
 
     if best_val is not None:
         source = "best" if config.eval_interval else "best (from the resumed run)"
+        ppl = math.exp(best_val)
         print(
-            f"{source} val {best_val:.3f} at step {best_step} -> {best_path}"
+            f"{source} val {best_val:.3f} (ppl {ppl:.2f}) at step {best_step} -> {best_path}"
         )
 
 
