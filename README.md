@@ -7,8 +7,9 @@ all here, readable, in 734 lines including the CLIs.
 
 The point is legibility at a size you can actually watch train. It reaches a last-logged
 loss of **0.090** (iteration 5900 of 6000 — the trainer only prints every 100 steps) in
-**7 minutes 20 seconds** on a laptop, and then reproduces a 200,000-character slice of
-WikiText-2 almost verbatim.
+**7 minutes 20 seconds** on an Apple Silicon laptop with the MPS backend, and then
+reproduces a 200,000-character slice of WikiText-2 almost verbatim. That timing is an
+MPS number; the CPU path is slower.
 
 ## Quickstart
 
@@ -49,23 +50,34 @@ wall clock will differ.
 | Packed training corpus | **43,656** tokens (200,000 characters of WikiText-2) |
 | Device | Apple MPS |
 
-Loss trace, first and last of the run:
+Loss is logged every 100 steps. This is a sampled subset of that trace, not every row —
+chosen to include two of the steps where it rises rather than falls, because a table
+sampled only at round thousands looks monotone and hides that:
 
 ```
 iter      elapsed   loss
      0      0.4s    8.802
    100      7.1s    6.493
   1000     66.7s    1.581
+  1300     88.9s    1.036
+  1400     95.5s    1.569    <- up, not down
   2000    135.1s    0.670
+  2800    188.4s    0.264
+  2900    195.0s    0.304    <- up, not down
   3000    201.7s    0.248
   4000    273.0s    0.122
+  5000    351.3s    0.113
   5900    424.0s    0.090
 ```
+
+Per-batch loss on a 43,656-token corpus is noisy, so the real curve wobbles like this.
+The trend is what matters, and the 0.090 at the end is not the minimum of a smooth
+descent — it is one sample from the tail.
 
 Verbatim output of `uv run python -m mini_transformer.generate --n 300` (default
 prompt `"The "`, temperature 0.8, top-p 0.95, one long line each). This is one run's
 capture: the sampler is not seeded, so re-running gives you different text of similar
-quality, sometimes better.
+quality, and the quality varies a lot between draws.
 
 ```
 The 00 ft / Ikaki m ) long overall and had a long ventral fin fold of arrived in the seven @-@ class battleships , 6 @.@ 4 @-@ inch of heran . Most of the theme wasoser in two above water 45 @-@
@@ -114,10 +126,12 @@ uv run python -m mini_transformer.multi_head_attention
 uv run python -m mini_transformer.model
 ```
 
-The other modules are utilities with nothing to demonstrate on a random tensor —
-running `python -m mini_transformer.rmsnorm` just exits silently. For standalone RoPE,
-RMSNorm and SwiGLU demos, use `expirements/03_rope.py`, `04_rmsnorm.py` and
-`05_swiglu.py`, which are runnable on their own and independent of the package.
+The rest either support the model (config, tokenizer, data, sampling, init) or are single
+layers from the diagram with no demo attached — `python -m mini_transformer.rmsnorm`
+exits silently. For RoPE, RMSNorm and SwiGLU, `expirements/03_rope.py`, `04_rmsnorm.py` and
+`05_swiglu.py` walk through each concept, importing the implementation from the package
+rather than reimplementing it: useful as a worked example of the call sequence, not as a
+pre-package build.
 
 Parameter arithmetic for `d_model=192`, `d_ff=512`, `n_layer=4`, `vocab=6,582`:
 
@@ -244,13 +258,16 @@ mini_transformer/
   init.py               GPT-2 style initialisation
   train.py              training CLI: warmup, cosine decay, decoupled decay groups
   generate.py           sampling CLI and checkpoint validation
-expirements/            standalone teaching scripts, superseded by the package
+expirements/            teaching scripts, superseded by the package
 tests/                  pytest suite
 ```
 
-`expirements/` holds the step-by-step builds the package grew out of: a bigram
-next-token model, raw-tensor attention before it became a module, then RoPE, RMSNorm and
-SwiGLU in isolation. They stay runnable and independent of the package.
+`expirements/` holds the step-by-step builds the package grew out of. The two earliest —
+`01_langauge_model.py` (a bigram next-token model) and `02_self_attention.py` (raw-tensor
+attention, before it became a module) — are self-contained and need only torch. The three
+later ones, `03_rope.py`, `04_rmsnorm.py` and `05_swiglu.py`, import the shipped
+implementations from `mini_transformer`, so they demonstrate the package and need it
+installed.
 
 ## Development
 
