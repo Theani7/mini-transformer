@@ -4,6 +4,7 @@ from mini_transformer.sampling import sample_next
 
 
 def test_returns_vocab_ids_in_range():
+    torch.manual_seed(0)
     logits = torch.randn(3, 500)
     out = sample_next(logits, temperature=0.8, top_p=0.9)
     assert out.shape == (3, 1)
@@ -36,9 +37,15 @@ def test_high_temperature_stays_in_vocab():
         assert 0 <= out.item() < 256
 
 
-def test_top_p_1_is_plain_sampling():
+def test_sampling_is_actually_stochastic():
     torch.manual_seed(0)
-    logits = torch.randn(1, 50)
-    a = sample_next(logits, temperature=1.0, top_p=1.0)
-    b = sample_next(logits, temperature=1.0, top_p=1.0)
-    assert a.shape == b.shape == (1, 1)
+    logits = torch.randn(1, 64)
+    seen = {sample_next(logits, temperature=1.0, top_p=1.0).item() for _ in range(20)}
+    assert len(seen) > 1
+
+
+def test_top_p_truncates_the_tail():
+    torch.manual_seed(0)
+    logits = torch.tensor([[4.0, 3.0, 2.0, 0.0]])  # strictly decreasing: no tie ambiguity
+    seen = {sample_next(logits, temperature=1.0, top_p=0.75).item() for _ in range(50)}
+    assert seen == {0, 1}

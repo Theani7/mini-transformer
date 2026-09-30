@@ -17,7 +17,7 @@ def sample_next(logits, temperature=1.0, top_p=1.0):
 
     sorted_probs, perm = torch.sort(probs, dim=-1, descending=True)
 
-    # drop tokens whose inclusive cumulative probability passes top_p
+    # drop tokens whose *preceding* cumulative probability already passed top_p
     cumulative = sorted_probs.cumsum(dim=-1)
     sorted_probs = sorted_probs.masked_fill(cumulative - sorted_probs > top_p, 0.0)
 
