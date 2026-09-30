@@ -189,9 +189,10 @@ for; every other field changing mid-run is rejected.
 ```bash
 uv run python -m mini_transformer.generate --n 300 --temperature 0.8 --top-p 0.95
 uv run python -m mini_transformer.generate --prompt "The museum " --n 200
-uv run python -m mini_transformer.generate --temperature 0.0     # greedy
-uv run python -m mini_transformer.generate --chat                # multi-turn ChatML conversation
-uv run python -m mini_transformer.generate --stop-on-eot         # stop decode on <|endoftext|>
+uv run python -m mini_transformer.generate --temperature 0.0 --repetition-penalty 1.2  # greedy without loops
+uv run python -m mini_transformer.generate --clean                    # normalize detached punctuation & escapes
+uv run python -m mini_transformer.generate --chat                     # multi-turn ChatML conversation
+uv run python -m mini_transformer.generate --stop-on-eot              # stop decode on <|endoftext|>
 ```
 
 From Python:

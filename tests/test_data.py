@@ -153,3 +153,19 @@ def test_pack_ids_writes_uint16_and_returns_count(tmp_path):
     assert np.frombuffer(path.read_bytes(), dtype=np.uint16).tolist() == (
         np.array(encode(tok, CORPUS), dtype=np.uint16).tolist()
     )
+
+
+def test_clean_corpus_text_normalizes_wikitext_escapes():
+    from mini_transformer.data import clean_corpus_text
+
+    raw = "well @-@ known and 10 @,@ 000 with 3 @.@ 14"
+    assert clean_corpus_text(raw) == "well-known and 10, 000 with 3. 14"
+
+
+def test_load_corpus_supports_eot_delimiters(monkeypatch):
+    from mini_transformer.tokenizer import EOT
+
+    _stub_datasets(monkeypatch, ["doc one", "doc two"])
+    loaded = load_corpus("Salesforce/wikitext", "wikitext-2-raw-v1", 1000, insert_eot=True)
+    assert loaded == f"doc one {EOT}\n\ndoc two"
+

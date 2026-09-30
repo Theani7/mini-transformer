@@ -17,6 +17,20 @@ from .tokenizer import (
 from .train import resolve_device
 
 
+def clean_text(text: str) -> str:
+    """Format and clean generated text by removing Wikipedia escape artifacts and fixing spacing."""
+    import re
+
+    text = text.replace(" @-@ ", "-").replace("@-@", "-")
+    text = text.replace(" @,@ ", ", ").replace("@,@", ", ")
+    text = text.replace(" @.@ ", ". ").replace("@.@", ". ")
+    text = re.sub(r"\s+([,.:;?!])", r"\1", text)
+    text = re.sub(r"\(\s+", "(", text)
+    text = re.sub(r"\s+\)", ")", text)
+    text = re.sub(r"\b(\w+)\s+'\s*([a-zA-Z]+)\b", r"\1'\2", text)
+    return text
+
+
 def load_checkpoint(path, device, vocab_size, config=None):
     """`config` is for callers holding an independent config to check against
     the checkpoint's; the CLI omits it, so the checkpoint's own config wins."""
@@ -175,6 +189,12 @@ def main(argv=None):
         default=False,
         help="stop generation when EOT token is emitted",
     )
+    p.add_argument(
+        "--clean",
+        action="store_true",
+        default=False,
+        help="clean WikiText formatting artifacts and fix detached punctuation in generated text",
+    )
     args = p.parse_args(argv)
 
     device = resolve_device(args.device)
@@ -251,7 +271,8 @@ def main(argv=None):
                 use_cache=args.use_cache,
                 eos_token_id=eos_token_id,
             )
-            print(decode(tokenizer, out[0].tolist()))
+            raw = decode(tokenizer, out[0].tolist())
+            print(clean_text(raw) if args.clean else raw)
 
     if args.chat:
         print("MiniTransformer ChatML mode (Ctrl+C or 'exit' to quit)\n")
@@ -291,7 +312,10 @@ def main(argv=None):
                 eos_token_id=eos_token_id,
             )
             print()
-            history.append({"role": "assistant", "content": decode(tokenizer, accumulated)})
+            content = decode(tokenizer, accumulated)
+            history.append(
+                {"role": "assistant", "content": clean_text(content) if args.clean else content}
+            )
     elif args.interactive:
         print("MiniTransformer interactive mode (Ctrl+C or 'exit' to quit)\n")
         while True:

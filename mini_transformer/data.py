@@ -4,12 +4,28 @@ import numpy as np
 import torch
 
 
-def load_corpus(dataset, dataset_config, corpus_chars):
+def clean_corpus_text(text: str) -> str:
+    """Normalize WikiText formatting artifacts such as escaped hyphens and commas."""
+    return (
+        text.replace(" @-@ ", "-")
+        .replace("@-@", "-")
+        .replace(" @,@ ", ", ")
+        .replace("@,@", ", ")
+        .replace(" @.@ ", ". ")
+        .replace("@.@", ". ")
+    )
+
+
+def load_corpus(dataset, dataset_config, corpus_chars, insert_eot=False):
     from datasets import load_dataset
+
+    from .tokenizer import EOT
 
     # A bare "wikitext" is not a valid namespace/name; the Hub retries it and the error takes 25 min.
     splits = load_dataset(dataset, dataset_config)
-    text = "\n\n".join(row for row in splits["train"]["text"] if row.strip())[:corpus_chars]
+    delimiter = f" {EOT}\n\n" if insert_eot else "\n\n"
+    rows = (clean_corpus_text(row) for row in splits["train"]["text"] if row.strip())
+    text = delimiter.join(rows)[:corpus_chars]
 
     if not text:
         raise ValueError(
@@ -18,6 +34,7 @@ def load_corpus(dataset, dataset_config, corpus_chars):
         )
 
     return text
+
 
 
 def pack_ids(ids, path):

@@ -5,7 +5,7 @@
 ```bash
 uv sync                                  # dev tools (pytest, ruff) are a dependency-group, not main deps
 uv run ruff check .                      # lint first — CI runs lint, then test
-uv run pytest -q                         # 129 tests, ~12s, fully offline
+uv run pytest -q                         # 133 tests, ~9s, fully offline
 uv run pytest tests/test_eval.py -q      # one file
 uv run pytest -q -k "resume"             # one behaviour
 uv build                                 # wheel + sdist

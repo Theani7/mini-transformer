@@ -448,3 +448,23 @@ def test_chat_mode_runs_conversation_turn(tmp_path, monkeypatch, capsys):
     assert "ChatML mode" in out
     assert "Assistant: " in out
 
+
+def test_clean_text_normalizes_formatting():
+    from mini_transformer.generate import clean_text
+
+    raw = "The espai no Hana 2 @,@ 000 was a ( profound ) walls , and it ' s good ."
+    cleaned = clean_text(raw)
+    assert "@,@" not in cleaned
+    assert "2, 000" in cleaned
+    assert "(profound)" in cleaned
+    assert "walls, and" in cleaned
+    assert "it's" in cleaned
+
+
+def test_clean_flag_normalizes_output(tmp_path, capsys):
+    main([*_cli(tmp_path), "--prompt", "the ", "--n", "2", "--clean"])
+
+    out = capsys.readouterr().out
+    assert out.startswith("the ")
+
+
