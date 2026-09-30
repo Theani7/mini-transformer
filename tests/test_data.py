@@ -147,7 +147,7 @@ def test_load_corpus_rejects_zero_chars(monkeypatch):
 def test_pack_ids_writes_uint16_and_returns_count(tmp_path):
     tok = _tokenizer(tmp_path)
     path = tmp_path / "nested" / "packed.bin"
-    count = pack_ids(tok, CORPUS, path)
+    count = pack_ids(np.array(encode(tok, CORPUS), dtype=np.uint16), path)
     assert count == len(encode(tok, CORPUS))
     assert path.stat().st_size == count * 2
     assert np.frombuffer(path.read_bytes(), dtype=np.uint16).tolist() == (

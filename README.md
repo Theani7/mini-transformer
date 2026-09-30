@@ -15,7 +15,7 @@ MPS number; the CPU path is slower.
 
 ```bash
 uv sync
-uv run python -m mini_transformer.train      # ~7 min: trains, writes checkpoints/model.pt
+uv run python -m mini_transformer.train      # ~7 min: trains, writes model.pt and best.pt
 uv run python -m mini_transformer.generate    # prints sampled text
 ```
 
@@ -236,6 +236,36 @@ Also worth knowing before you read generated output:
   does not appear in the corpus may produce a garbage first line before the model finds a
   passage it knows, which is what the sample above does.
 
+## Validation and best checkpoint
+
+`train` holds out the **tail** of the corpus (not a random sample) as validation and
+scores **every** window of it every `--eval-interval` steps. Being exhaustive makes the
+number deterministic, so a change in val loss always means a change in the model.
+
+```bash
+uv run python -m mini_transformer.train --iters 800 --eval-interval 200
+# iter      elapsed     train      val   best
+#      200     13.7s     5.384   6.375  6.375
+#      700     57.9s     2.128   7.522  6.375
+# best val 6.375 at step 201 -> checkpoints/best.pt
+```
+
+| flag | default | effect |
+| --- | --- | --- |
+| `--val-fraction` | `0.05` | fraction of tokens held out |
+| `--eval-interval` | `250` | steps between evals; `0` disables them |
+| `--best-out` | `checkpoints/best.pt` | where the best-val weights land |
+
+`checkpoints/model.pt` is still the final step, so nothing about the default workflow
+changes. `best.pt` carries its own `step` and `val_loss`, so the two files are
+distinguishable. The val set is a **minimum** of `block_size + 2` tokens even when
+`--val-fraction` would give it less, and a corpus too small for two usable halves is
+an error rather than a silent bad batch.
+
+The caveat worth reading: this repo memorises, so val loss *rises* as training improves.
+See the matching entry under **Known ceilings** for why that makes `model.pt` the better
+checkpoint for text.
+
 ## Known ceilings
 
 - **The KV cache exists but is off by default.** `generate(..., use_cache=True)` keeps a
@@ -248,9 +278,15 @@ Also worth knowing before you read generated output:
   launch cost stops dominating. `use_cache=True` and `use_cache=False` produce
   **byte-identical** tokens, which is what makes the comparison honest.
 - **Single-sequence decode.** `generate()` handles one prompt at a time.
-- **No train/validation split** and no checkpoint selection: the last step is the
-  deliverable. Use `--resume` to extend a run, which is how you would get a validation
-  number if you added one.
+- **Best-val picks the *least* useful checkpoint for text.** The split and eval loop are
+  exact, and the selection works: on an 800-step run, val loss bottoms at **6.375 at
+  step 201** and then climbs to 7.522 while train loss falls 3.9 → 2.1. So `best.pt`
+  marks the step where memorisation begins. But at 3M parameters the step-201 model has
+  barely learned English, and greedy decode from it is noise, while the final
+  `checkpoints/model.pt` produces coherent (over-repeating) WikiText prose. For
+  **text**, use `model.pt`; for **knowing where generalisation peaked**, use `best.pt`.
+  Picking "best" by val loss is only the right default once the model is large enough
+  that the pre-memorisation point is also a useful one.
 - **`uint16` packing caps the vocabulary at 65,535 tokens.** `train_tokenizer` raises
   rather than silently truncating ids.
 

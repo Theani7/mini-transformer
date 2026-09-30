@@ -3,8 +3,6 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from .tokenizer import encode
-
 
 def load_corpus(dataset, dataset_config, corpus_chars):
     from datasets import load_dataset
@@ -22,11 +20,41 @@ def load_corpus(dataset, dataset_config, corpus_chars):
     return text
 
 
-def pack_ids(tokenizer, text, path):
-    ids = np.array(encode(tokenizer, text), dtype=np.uint16)
+def pack_ids(ids, path):
+    """Write an id array to disk. Encoding and splitting are the caller's job,
+    so the same primitive serves both the train and the val half."""
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    Path(path).write_bytes(ids.tobytes())
+    Path(path).write_bytes(np.asarray(ids, dtype=np.uint16).tobytes())
     return len(ids)
+
+
+def split_ids(ids, val_fraction, block_size):
+    """Hold out the tail for validation.
+
+    Both halves must be at least `block_size + 2` tokens or `load_packed`
+    cannot form a batch from them, so the requested fraction is treated as a
+    minimum, not an exact target.
+    """
+    if len(ids) == 0:
+        raise ValueError("cannot split an empty corpus")
+
+    minimum = block_size + 2
+    n_val = int(len(ids) * val_fraction)
+    if n_val < 1:
+        raise ValueError(
+            f"val_fraction={val_fraction} leaves no validation tokens "
+            f"from {len(ids)}"
+        )
+
+    if len(ids) < 2 * minimum:
+        raise ValueError(
+            f"{len(ids)} tokens cannot be split into two sides of at least "
+            f"{minimum}; raise corpus_chars or lower block_size"
+        )
+
+    n_val = max(n_val, minimum)
+    cut = len(ids) - n_val
+    return ids[:cut], ids[cut:]
 
 
 def load_packed(path, block_size):

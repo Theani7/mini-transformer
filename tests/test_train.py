@@ -140,29 +140,31 @@ def test_resume_never_downgrades_a_finished_checkpoint(monkeypatch, tmp_path, ca
 def test_stale_cache_is_retrained_when_the_corpus_changes(monkeypatch, tmp_path):
     packs = _spy(monkeypatch, "pack_ids")
 
-    _run(monkeypatch, tmp_path, ["--iters", "1", "--device", "cpu", "--corpus-chars", "400"])
+    _run(monkeypatch, tmp_path, ["--iters", "1", "--device", "cpu", "--corpus-chars", "4000"])
     _run(monkeypatch, tmp_path, ["--iters", "1", "--device", "cpu", "--corpus-chars", "9000"])
 
-    assert len(packs) == 2
+    # two repacks, each writing a train and a val half
+    assert len(packs) == 4
     assert Config.load(tmp_path / "data" / "config.json").corpus_chars == 9000
 
 
 def test_a_stamp_from_another_version_is_treated_as_a_cache_miss(monkeypatch, tmp_path):
-    """`Config` lost a field in this task, which made every `data/config.json`
-    written by an earlier version unloadable. A stamp is a cache: the fix is to
-    rebuild it, not to crash the run before training starts."""
+    """A `data/config.json` written by a different `Config` shape is a cache
+    miss, not a crash. Renaming or removing a `Config` field makes every
+    stamp written before it unloadable, and the fix is to rebuild the cache
+    rather than fail the run before training starts."""
     packs = _spy(monkeypatch, "pack_ids")
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     stale = asdict(Config())
-    stale["eval_interval"] = 500
+    stale["retired_field"] = 1
     (data_dir / "config.json").write_text(json.dumps(stale))
 
     _run(monkeypatch, tmp_path, ["--iters", "1", "--device", "cpu"])
 
-    assert len(packs) == 1
+    assert len(packs) == 2  # one repack, two halves
     rebuilt = json.loads((data_dir / "config.json").read_text())
-    assert "eval_interval" not in rebuilt
+    assert "retired_field" not in rebuilt
     assert rebuilt["corpus_chars"] == Config().corpus_chars
 
 
@@ -172,7 +174,7 @@ def test_iteration_flags_do_not_invalidate_the_cache(monkeypatch, tmp_path):
     _run(monkeypatch, tmp_path, ["--iters", "5", "--device", "cpu"])
     _run(monkeypatch, tmp_path, ["--iters", "9", "--device", "cpu", "--batch-size", "2"])
 
-    assert len(packs) == 1
+    assert len(packs) == 2  # only the first run repacked
 
 
 def test_the_head_is_sized_from_the_tokenizer_not_the_requested_vocab(monkeypatch, tmp_path):
@@ -260,5 +262,5 @@ def test_a_truncated_stamp_is_treated_as_a_cache_miss(monkeypatch, tmp_path):
 
     _run(monkeypatch, tmp_path, ["--iters", "1", "--device", "cpu"])
 
-    assert len(packs) == 1
+    assert len(packs) == 2  # one repack, two halves
     assert Config.load(data_dir / "config.json").corpus_chars == Config().corpus_chars

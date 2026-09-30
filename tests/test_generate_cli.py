@@ -87,7 +87,7 @@ def test_a_checkpoint_from_another_version_names_the_unknown_field(tmp_path):
         {
             "model": model.state_dict(),
             "step": 1,
-            "config": {**config.__dict__, "eval_interval": 500},
+            "config": {**config.__dict__, "retired_field": 1},
         },
         path,
     )
@@ -96,7 +96,7 @@ def test_a_checkpoint_from_another_version_names_the_unknown_field(tmp_path):
         load_checkpoint(path, "cpu", vocab_size=64)
 
     message = str(excinfo.value)
-    assert "eval_interval" in message
+    assert "retired_field" in message
     assert "written by a different version" in message
     assert "retrain" in message
 
@@ -116,12 +116,12 @@ def test_a_checkpoint_from_another_version_names_the_unknown_field_even_when_a_c
         {
             "model": model.state_dict(),
             "step": 1,
-            "config": {**config.__dict__, "eval_interval": 500},
+            "config": {**config.__dict__, "retired_field": 1},
         },
         path,
     )
 
-    with pytest.raises(ValueError, match="eval_interval"):
+    with pytest.raises(ValueError, match="retired_field"):
         load_checkpoint(path, "cpu", vocab_size=64, config=Config())
 
 

@@ -27,6 +27,9 @@ class Config:
     beta1: float = 0.9
     beta2: float = 0.95
     grad_clip: float = 1.0
+    # validation
+    val_fraction: float = 0.05
+    eval_interval: int = 250
     # bookkeeping
     seed: int = 42
     sample_interval: int = 1000

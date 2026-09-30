@@ -3,16 +3,23 @@ import math
 import time
 from pathlib import Path
 
+import numpy as np
 import torch
 import torch.nn.functional as F
 
 from .config import Config, resolve_checkpoint_config
-from .data import get_batch, load_corpus, load_packed, pack_ids
+from .data import get_batch, load_corpus, load_packed, pack_ids, split_ids
 from .init import init_weights
 from .model import MiniTransformer
 from .tokenizer import EOT, decode, encode, load_tokenizer, train_tokenizer
 
-CACHE_KEY = ("dataset", "dataset_config", "corpus_chars", "bpe_vocab_size")
+CACHE_KEY = (
+    "val_fraction",
+    "dataset",
+    "dataset_config",
+    "corpus_chars",
+    "bpe_vocab_size",
+)
 
 
 def resolve_device(requested):
@@ -42,6 +49,49 @@ def build_optimizer(model, config):
     )
 
 
+def evaluate(model, data, batch_size, block_size, device):
+    """Mean loss over every window in the split.
+
+    Exhaustive rather than sampled: a 5% slice of a 43k-token corpus is only a
+    few hundred windows, and covering all of them makes the number
+    deterministic and low-variance enough to select a checkpoint on.
+    """
+    was_training = model.training
+    model.eval()
+
+    total = len(data) - block_size - 1
+    cos, sin = _rope(model.config, device)
+    losses = []
+
+    with torch.no_grad():
+        for start in range(0, total, batch_size):
+            count = min(batch_size, total - start)
+            indices = torch.arange(start, start + count)
+            x = torch.stack(
+                [torch.from_numpy(data[i : i + block_size].astype(np.int64)) for i in indices]
+            )
+            y = torch.stack(
+                [
+                    torch.from_numpy(data[i + 1 : i + 1 + block_size].astype(np.int64))
+                    for i in indices
+                ]
+            )
+            logits = model(x.to(device), cos, sin)
+            losses.append(
+                F.cross_entropy(
+                    logits.view(-1, model.vocab_size),
+                    y.to(device).view(-1),
+                    reduction="sum",
+                )
+            )
+
+    if was_training:
+        model.train()
+
+    # summed over tokens, so divide by tokens and not by windows
+    return float(torch.stack(losses).sum() / (total * block_size))
+
+
 def parse_args(argv=None):
     defaults = Config()
     p = argparse.ArgumentParser(description="Train the mini transformer")
@@ -52,8 +102,11 @@ def parse_args(argv=None):
     p.add_argument("--batch-size", type=int, default=defaults.batch_size)
     p.add_argument("--lr", type=float, default=defaults.lr)
     p.add_argument("--device", default="auto")
+    p.add_argument("--val-fraction", type=float, default=defaults.val_fraction)
+    p.add_argument("--eval-interval", type=int, default=defaults.eval_interval)
     p.add_argument("--data-dir", default="data")
     p.add_argument("--out", default="checkpoints/model.pt")
+    p.add_argument("--best-out", default="checkpoints/best.pt")
     p.add_argument("--resume", action="store_true")
     return p.parse_args(argv)
 
@@ -67,6 +120,8 @@ def main(argv=None):
         iters=args.iters,
         batch_size=args.batch_size,
         lr=args.lr,
+        val_fraction=args.val_fraction,
+        eval_interval=args.eval_interval,
     )
 
     device = resolve_device(args.device)
@@ -75,6 +130,7 @@ def main(argv=None):
 
     tokenizer_path = data_dir / "tokenizer.json"
     train_path = data_dir / "train.bin"
+    val_path = data_dir / "val.bin"
     stamp_path = data_dir / "config.json"
 
     # The stamp is a cache, written only by this module, so a format change
@@ -88,18 +144,33 @@ def main(argv=None):
         stamp = None
 
     stale = stamp is None or _cache_key(stamp) != _cache_key(config)
-    if stale or not tokenizer_path.exists() or not train_path.exists():
+    if (
+        stale
+        or not tokenizer_path.exists()
+        or not train_path.exists()
+        or not val_path.exists()
+    ):
         text = load_corpus(config.dataset, config.dataset_config, config.corpus_chars)
         train_tokenizer([text], config.bpe_vocab_size, tokenizer_path)
-        count = pack_ids(load_tokenizer(tokenizer_path), text, train_path)
+        tokenizer = load_tokenizer(tokenizer_path)
+
+        ids = np.array(encode(tokenizer, text), dtype=np.uint16)
+        train_ids, val_ids = split_ids(
+            ids, config.val_fraction, config.block_size
+        )
+
+        n_train = pack_ids(train_ids, train_path)
+        n_val = pack_ids(val_ids, val_path)
+
         config.save(stamp_path)
-        print(f"packed {count:,} tokens -> {train_path}")
+        print(f"packed {n_train:,} train / {n_val:,} val tokens")
 
     tokenizer = load_tokenizer(tokenizer_path)
     vocab_size = tokenizer.get_vocab_size()
     print(f"tokenizer: {vocab_size} tokens (requested {config.bpe_vocab_size})")
 
     data = load_packed(train_path, config.block_size)
+    val_data = load_packed(val_path, config.block_size)
 
     model = MiniTransformer(vocab_size=vocab_size, config=config)
     init_weights(model, config.n_layer)
@@ -141,10 +212,17 @@ def main(argv=None):
     generator = torch.Generator().manual_seed(config.seed)
 
     print(f"device={device} params={sum(p.numel() for p in model.parameters()):,}")
-    print("iter      elapsed   loss")
+    print("iter      elapsed     train      val   best")
 
     started = time.perf_counter()
     completed = start
+    val_loss = None
+    best_val = None
+    best_step = start
+    best_path = Path(args.best_out)
+    # The first eval fires inside the loop, before the final save creates the
+    # directory, so the parent has to exist up front.
+    best_path.parent.mkdir(parents=True, exist_ok=True)
 
     for step in range(start, config.iters):
         for group in optimizer.param_groups:
@@ -166,14 +244,60 @@ def main(argv=None):
 
         if step % 100 == 0:
             elapsed = time.perf_counter() - started
-            print(f"{step:>6}  {elapsed:>7.1f}s  {loss.item():>7.3f}", flush=True)
+            val_text = f"{val_loss:>8.3f}" if val_loss is not None else " " * 8
+            best_text = f"{best_val:>7.3f}" if best_val is not None else " " * 7
+            print(
+                f"{step:>6}  {elapsed:>7.1f}s  {loss.item():>8.3f}"
+                f"{val_text}{best_text}",
+                flush=True,
+            )
+
+        if (
+            config.eval_interval
+            and step
+            and step % config.eval_interval == 0
+            and step >= start
+        ):
+            val_loss = evaluate(
+                model, val_data, config.batch_size, config.block_size, device
+            )
+            if best_val is None or val_loss < best_val:
+                best_val = val_loss
+                best_step = completed
+                torch.save(
+                    {
+                        "model": model.state_dict(),
+                        "step": completed,
+                        "val_loss": val_loss,
+                        "config": config.__dict__,
+                    },
+                    best_path,
+                )
 
         if config.sample_interval and step and step % config.sample_interval == 0:
             print(_sample(model, tokenizer, config, device, ""))
 
+    if config.eval_interval and best_val is None:
+        val_loss = evaluate(
+            model, val_data, config.batch_size, config.block_size, device
+        )
+        best_val, best_step = val_loss, completed
+        torch.save(
+            {
+                "model": model.state_dict(),
+                "step": completed,
+                "val_loss": val_loss,
+                "config": config.__dict__,
+            },
+            best_path,
+        )
+
     out_path.parent.mkdir(parents=True, exist_ok=True)
     torch.save({"model": model.state_dict(), "step": completed, "config": config.__dict__}, out_path)
     print(f"\nsaved {out_path}")
+
+    if best_val is not None:
+        print(f"best val {best_val:.3f} at step {best_step} -> {best_path}")
 
 
 def _cache_key(config):
