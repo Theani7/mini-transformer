@@ -39,5 +39,8 @@ def test_rejects_empty_corpus(tmp_path):
 
 def test_warns_when_vocab_falls_short_of_request(tmp_path, capsys):
     # A short corpus cannot supply enough merges; 512 is unreachable here.
-    train_tokenizer(["short text"], vocab_size=4096, path=tmp_path / "t.json")
+    path = tmp_path / "t.json"
+    size = train_tokenizer(["short text"], vocab_size=4096, path=path)
+    tok = load_tokenizer(path)
     assert "4096" in capsys.readouterr().out
+    assert size == tok.get_vocab_size() < 4096
