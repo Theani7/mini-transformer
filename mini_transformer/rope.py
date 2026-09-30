@@ -21,4 +21,9 @@ def rotate_half(x):
 
 
 def apply_rope(x, cos, sin):
+    if x.shape[-1] != cos.shape[-1]:
+        raise ValueError(
+            f"apply_rope expects (batch, heads, seq, head_dim); got "
+            f"last dim {x.shape[-1]} but the cache has head_dim {cos.shape[-1]}"
+        )
     return x * cos + rotate_half(x) * sin

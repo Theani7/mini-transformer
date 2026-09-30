@@ -109,3 +109,50 @@ def test_swiglu_shape_gating_and_no_projection_biases():
         ffn.gate.weight.normal_()
         ffn.up.weight.zero_()
     assert torch.allclose(ffn(x), torch.zeros(2, 3, 16))
+
+
+from mini_transformer.multi_head_attention import MultiHeadAttention
+
+
+def _attention(block_size=16, d_model=32, n_head=4):
+    torch.manual_seed(0)
+    attn = MultiHeadAttention(d_model=d_model, n_head=n_head)
+    cos, sin = rope_cache(block_size, d_model // n_head)
+    return attn, cos, sin
+
+
+def test_attention_preserves_shape():
+    attn, cos, sin = _attention()
+    x = torch.randn(2, 16, 32)
+    assert attn(x, cos, sin).shape == (2, 16, 32)
+
+
+def test_attention_is_causal():
+    """No output position may depend on a later input position."""
+    attn, cos, sin = _attention()
+    x = torch.randn(1, 16, 32)
+    before = attn(x, cos, sin)
+
+    perturbed = x.clone()
+    perturbed[0, 8:] = torch.randn(8, 32) * 5
+    after = attn(perturbed, cos, sin)
+
+    assert torch.allclose(before[0, :8], after[0, :8], atol=1e-6)
+    assert not torch.allclose(before[0, 8:], after[0, 8:], atol=1e-6)
+
+
+def test_attention_rejects_indivisible_head_count():
+    with pytest.raises(ValueError):
+        MultiHeadAttention(d_model=30, n_head=4)
+
+
+def test_apply_rope_rejects_wrong_rank_input():
+    cos, sin = rope_cache(8, 8)
+    with pytest.raises(ValueError, match="head_dim"):
+        apply_rope(torch.randn(2, 8, 16), cos, sin)
+
+
+def test_apply_rope_leaves_4d_path_unchanged():
+    cos, sin = rope_cache(8, 8)
+    x = torch.randn(2, 4, 8, 8)
+    assert torch.equal(apply_rope(x, cos, sin), x * cos + rotate_half(x) * sin)
