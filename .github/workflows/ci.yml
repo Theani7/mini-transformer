@@ -65,8 +65,8 @@ jobs:
       # initialisation (loss 182 instead of 9) presented itself.
       - name: Train 120 steps and assert the loss descends
         run: |
-          uv run python -m mini_transformer.train --iters 120 > train.log 2>&1
-          cat train.log
+          set -o pipefail
+          uv run python -m mini_transformer.train --iters 120 2>&1 | tee train.log
           uv run python - <<'PY'
           import re
 
