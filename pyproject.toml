@@ -27,7 +27,9 @@ classifiers = [
     "Topic :: Education",
 ]
 dependencies = [
+    "datasets>=5",
     "numpy>=2.5.3",
+    "tokenizers>=0.23",
     "torch>=2.14.0",
 ]
 
