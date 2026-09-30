@@ -225,7 +225,7 @@ Also worth knowing before you read generated output:
 - **`<|endoftext|>` is never trained, and nothing stops on it.** The packed corpus
   contains zero end tokens — `data.py` joins rows with `"\n\n"` and never inserts one —
   so that row is never a training target (it does still receive gradient through the
-  tied softmax denominator, which pushes it down) and the model is never taught to
+  tied softmax denominator, which lowers its logit) and the model is never taught to
   produce the token; `generate` also has no stop-on-EOT path. Output always runs the
   full `--n` tokens, and `decode` strips the token if it ever appears. A sample that
   runs on past where you expected a stop is not the model failing to learn to stop: it
