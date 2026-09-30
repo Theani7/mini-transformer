@@ -2,8 +2,10 @@ import json
 from dataclasses import FrozenInstanceError
 
 import pytest
+from torch import nn
 
 from mini_transformer.config import Config
+from mini_transformer.init import init_weights
 
 
 def test_defaults_match_measured_configuration():
@@ -24,11 +26,6 @@ def test_roundtrips_through_disk(tmp_path):
 def test_is_frozen():
     with pytest.raises(FrozenInstanceError):
         Config().d_model = 1
-
-
-from torch import nn
-
-from mini_transformer.init import init_weights
 
 
 class _Block(nn.Module):

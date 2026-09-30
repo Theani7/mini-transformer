@@ -53,3 +53,10 @@ dev = [
     "pytest>=9.1.1",
     "ruff>=0.16.9",
 ]
+
+# Ruff's default select is only `E4, E7, E9, F`, which leaves out two checks the
+# project actually leans on: `E402` (the two findings below were real and had
+# been cited in review without `ruff check .` ever showing them) and `B`, whose
+# `B017` is what would catch a `pytest.raises(Exception)` that asserts nothing.
+[tool.ruff.lint]
+extend-select = ["E402", "B"]
