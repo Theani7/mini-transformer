@@ -22,6 +22,13 @@ def test_rmsnorm_respects_learned_scale():
     assert out.pow(2).mean().sqrt().item() == pytest.approx(2.0, abs=1e-3)
 
 
+def test_rmsnorm_eps_guards_zero_input():
+    norm = RMSNorm(8)
+    out = norm(torch.zeros(1, 8))
+    assert torch.isfinite(out).all()
+    assert out.abs().max().item() == pytest.approx(0.0, abs=1e-6)
+
+
 def test_rope_cache_shape_and_odd_dim_rejected():
     cos, sin = rope_cache(16, 8)
     assert cos.shape == (1, 1, 16, 8)
@@ -49,11 +56,56 @@ def test_rope_depends_only_on_relative_offset():
     assert torch.allclose(first, second, atol=1e-5)
 
 
-def test_swiglu_shape_and_gating():
+# GPT-NeoX reference, head_dim=8, base=1e4, at position 3: theta_i = 3 * 1e4**(-i/4)
+# for i = 0..3, giving theta = (3, 0.3, 0.03, 0.003). Probing every pair is what
+# pins base and the frequency ladder; pair 0 alone is blind to base.
+NEOX_LADDER_AT_3 = (
+    (-0.9899924966, 0.1411200081),
+    (0.9553364891, 0.2955202067),
+    (0.9995500337, 0.0299955002),
+    (0.9999955000, 0.0029999955),
+)
+
+
+def test_rope_matches_neox_rotation():
+    cos, sin = rope_cache(8, 8)
+    e0 = torch.tensor([[[[1.0, 0, 0, 0, 0, 0, 0, 0]]]])
+    out = apply_rope(e0, cos[:, :, 1:2], sin[:, :, 1:2]).flatten()
+    assert torch.allclose(out, torch.tensor([0.5403, 0, 0, 0, 0.8415, 0, 0, 0]), atol=1e-4)
+    for pair, (expected_cos, expected_sin) in enumerate(NEOX_LADDER_AT_3):
+        e = torch.zeros(1, 1, 1, 8)
+        e[0, 0, 0, pair] = 1.0
+        rotated = apply_rope(e, cos[:, :, 3:4], sin[:, :, 3:4]).flatten()
+        assert rotated[pair] == pytest.approx(expected_cos, abs=1e-6)
+        assert rotated[pair + 4] == pytest.approx(expected_sin, abs=1e-6)
+
+
+def test_rope_broadcasts_over_batch_and_heads():
+    cos, sin = rope_cache(6, 8)
+    x = torch.randn(2, 4, 6, 8)
+    out = apply_rope(x, cos[:, :, :6], sin[:, :, :6])
+    assert out.shape == (2, 4, 6, 8)
+    per_position = torch.cat(
+        [
+            apply_rope(x[:, :, t : t + 1], cos[:, :, t : t + 1], sin[:, :, t : t + 1])
+            for t in range(6)
+        ],
+        dim=2,
+    )
+    assert torch.allclose(out, per_position)
+
+
+def test_swiglu_shape_gating_and_no_projection_biases():
     ffn = SwiGLU(16, 32)
     x = torch.randn(2, 3, 16)
     assert ffn(x).shape == (2, 3, 16)
-    with torch.no_grad():
-        ffn.up.weight.zero_()
+    assert ffn.gate.bias is None and ffn.up.bias is None and ffn.down.bias is None
     # gate is multiplied by up, so zeroing up must zero the output
+    with torch.no_grad():
+        ffn.gate.weight.zero_()
+    assert torch.allclose(ffn(x), torch.zeros(2, 3, 16))
+    # restore the gate so the up probe is not vacuous, then zero up instead
+    with torch.no_grad():
+        ffn.gate.weight.normal_()
+        ffn.up.weight.zero_()
     assert torch.allclose(ffn(x), torch.zeros(2, 3, 16))
