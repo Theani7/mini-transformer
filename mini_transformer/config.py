@@ -28,7 +28,6 @@ class Config:
     grad_clip: float = 1.0
     # bookkeeping
     seed: int = 42
-    eval_interval: int = 500
     sample_interval: int = 1000
 
     @property
