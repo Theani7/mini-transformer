@@ -15,19 +15,13 @@ MPS number; the CPU path is slower.
 
 ```bash
 uv sync
-uv run python -m mini_transformer.train      # ~7 min: trains, writes checkpoints/model.pt
-uv run python -m mini_transformer.generate    # prints sampled text
+uv run mini-transformer                       # samples text from checkpoints/model.safetensors
+uv run mini-transformer -i                    # interactive prompt REPL loop
+uv run mini-eval                              # evaluates loss and perplexity
+uv run python -m mini_transformer.train       # retrains, writes checkpoints/model.safetensors & .pt
 ```
 
-`mini-transformer` is installed as a console script pointing at the same entry point, so
-after `uv sync` this works too:
-
-```bash
-uv run mini-transformer                      # same as python -m mini_transformer.generate
-```
-
-Running it before training exits with a message telling you to run the trainer, rather
-than a placeholder greeting.
+`mini-transformer` and `mini-eval` are installed as console scripts. You can run generation immediately with the included `checkpoints/model.safetensors` bundle or train from scratch. Generation supports streaming (`--stream`), fast KV caching (`--use-cache`), and sampling controls (`--top-k`, `--repetition-penalty`, `--temperature`, `--top-p`).
 
 Requires Python 3.14+. Runtime dependencies are `torch`, `tokenizers`, `datasets` and
 `numpy` (torch initialises NumPy at startup and warns without it).
@@ -315,10 +309,13 @@ mini_transformer/
   feed_forward.py       SwiGLU
   rmsnorm.py            RMSNorm
   rope.py               rotary position embeddings
-  sampling.py           temperature + nucleus sampling
+  sampling.py           temperature, top-p, top-k, repetition penalty
   init.py               GPT-2 style initialisation
-  train.py              training CLI: warmup, cosine decay, decoupled decay groups
-  generate.py           sampling CLI and checkpoint validation
+  train.py              training CLI: warmup, cosine decay, early stopping, AdamW
+  generate.py           sampling CLI: streaming, KV-cache, interactive REPL
+  eval.py               evaluation CLI: cross-entropy loss and perplexity
+  py.typed              PEP 561 type annotation marker
+checkpoints/            pre-trained safetensors model, config, and tokenizer
 expirements/            teaching scripts, superseded by the package
 tests/                  pytest suite
 ```
@@ -333,7 +330,7 @@ installed.
 ## Development
 
 ```bash
-uv run pytest -q           # 123 tests
+uv run pytest -q           # 124 tests
 uv run ruff check .
 uv build                   # wheel + sdist
 ```

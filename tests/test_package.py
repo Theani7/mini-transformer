@@ -64,3 +64,17 @@ def test_importing_every_module_prints_nothing():
 
     assert result.returncode == 0, result.stderr
     assert result.stdout == "", result.stdout
+
+
+def test_package_exports_public_api():
+    """`mini_transformer` must export primary classes and helpers at the package root."""
+    import mini_transformer
+
+    assert hasattr(mini_transformer, "MiniTransformer")
+    assert hasattr(mini_transformer, "Config")
+    assert hasattr(mini_transformer, "encode")
+    assert hasattr(mini_transformer, "decode")
+    assert hasattr(mini_transformer, "load_tokenizer")
+    assert hasattr(mini_transformer, "__version__")
+    assert mini_transformer.__version__ == "0.2.0"
+
