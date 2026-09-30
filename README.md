@@ -154,6 +154,12 @@ All hyperparameters live in `config.py`; `train.py` and `generate.py` read them 
 checkpoint stores a copy, so a mismatched checkpoint is rejected rather than silently
 loaded.
 
+Only six of the twenty fields have a CLI flag (`--dataset`, `--dataset-config`,
+`--corpus-chars`, `--iters`, `--batch-size`, `--lr`). **A hyperparameter sweep over any
+of the other fourteen means editing `config.py`** — there is no `--config` file flag.
+`--resume` deliberately ignores `iters`, since raising the iteration count is what it is
+for; every other field changing mid-run is rejected.
+
 | Data | Value |
 |---|---|
 | Dataset | `Salesforce/wikitext`, config `wikitext-2-raw-v1` |
@@ -216,10 +222,13 @@ evaluation, so every number in this README is a training-set number.
 
 Also worth knowing before you read generated output:
 
-- **`decode` strips `<|endoftext|>`.** Generation runs for a fixed `--n` tokens and the
-  end token is dropped by the tokenizer's decoder, so output has no visible ending. A
-  sample that runs on past where you expected a stop is not the model failing to learn
-  to stop.
+- **`<|endoftext|>` is never trained, and nothing stops on it.** The packed corpus
+  contains zero end tokens — `data.py` joins rows with `"\n\n"` and never inserts one —
+  so that embedding row never receives a gradient and the model is never taught to
+  produce the token; `generate` also has no stop-on-EOT path. Output always runs the
+  full `--n` tokens, and `decode` strips the token if it ever appears. A sample that
+  runs on past where you expected a stop is not the model failing to learn to stop: it
+  was never taught to.
 - **Punctuation is spaced** (` , ` `. `) and some tokens are byte-level fragments, because
   that is how the corpus is written.
 - **Prompts the model has no memorised continuation for start as noise.** A prompt that
@@ -272,7 +281,7 @@ installed.
 ## Development
 
 ```bash
-uv run pytest -q           # 81 tests
+uv run pytest -q           # 91 tests
 uv run ruff check .
 uv build                   # wheel + sdist
 ```
