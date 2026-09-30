@@ -35,6 +35,39 @@ def test_exactly_one_norm_before_head():
     assert len(norms) == CONFIG.n_layer * 2 + 1
 
 
+def test_final_norm_consumes_the_last_blocks_output():
+    from mini_transformer.rope import rope_cache
+
+    model = _model().eval()
+    seen = {}
+    model.blocks[-1].register_forward_hook(lambda m, i, o: seen.__setitem__("out", o))
+    model.norm.register_forward_hook(lambda m, i, o: seen.__setitem__("in", i[0]))
+
+    model(torch.randint(0, VOCAB, (1, 16)), *rope_cache(16, CONFIG.head_dim))
+
+    assert torch.equal(seen["in"], seen["out"])
+
+
+def test_block_normalises_inside_both_residual_branches():
+    from mini_transformer.rope import rope_cache
+    from mini_transformer.transformer_block import TransformerBlock
+
+    torch.manual_seed(0)
+    block = TransformerBlock(d_model=32, n_head=4, d_ff=64)
+    x = torch.randn(1, 8, 32)
+
+    seen = {}
+    block.norm1.register_forward_hook(lambda m, i, o: seen.__setitem__("norm1", o))
+    block.attention.register_forward_hook(lambda m, i, o: seen.__setitem__("attn", i[0]))
+    block.norm2.register_forward_hook(lambda m, i, o: seen.__setitem__("norm2", o))
+    block.feed_forward.register_forward_hook(lambda m, i, o: seen.__setitem__("ffn", i[0]))
+
+    block(x, *rope_cache(8, 8))
+
+    assert torch.equal(seen["attn"], seen["norm1"])
+    assert torch.equal(seen["ffn"], seen["norm2"])
+
+
 def test_model_is_causal():
     from mini_transformer.rope import rope_cache
 
