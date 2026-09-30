@@ -77,7 +77,14 @@ def main(argv=None):
     train_path = data_dir / "train.bin"
     stamp_path = data_dir / "config.json"
 
-    stamp = Config.load(stamp_path) if stamp_path.exists() else None
+    # The stamp is a cache, written only by this module, so a format change
+    # should invalidate it rather than crash. `Config.load` stays strict for
+    # every other caller.
+    try:
+        stamp = Config.load(stamp_path) if stamp_path.exists() else None
+    except TypeError:
+        stamp = None
+
     stale = stamp is None or _cache_key(stamp) != _cache_key(config)
     if stale or not tokenizer_path.exists() or not train_path.exists():
         text = load_corpus(config.dataset, config.dataset_config, config.corpus_chars)

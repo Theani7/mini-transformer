@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+import json
+from dataclasses import asdict, dataclass
 
 import pytest
 import torch
@@ -144,6 +145,25 @@ def test_stale_cache_is_retrained_when_the_corpus_changes(monkeypatch, tmp_path)
 
     assert len(packs) == 2
     assert Config.load(tmp_path / "data" / "config.json").corpus_chars == 9000
+
+
+def test_a_stamp_from_another_version_is_treated_as_a_cache_miss(monkeypatch, tmp_path):
+    """`Config` lost a field in this task, which made every `data/config.json`
+    written by an earlier version unloadable. A stamp is a cache: the fix is to
+    rebuild it, not to crash the run before training starts."""
+    packs = _spy(monkeypatch, "pack_ids")
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    stale = asdict(Config())
+    stale["eval_interval"] = 500
+    (data_dir / "config.json").write_text(json.dumps(stale))
+
+    _run(monkeypatch, tmp_path, ["--iters", "1", "--device", "cpu"])
+
+    assert len(packs) == 1
+    rebuilt = json.loads((data_dir / "config.json").read_text())
+    assert "eval_interval" not in rebuilt
+    assert rebuilt["corpus_chars"] == Config().corpus_chars
 
 
 def test_iteration_flags_do_not_invalidate_the_cache(monkeypatch, tmp_path):

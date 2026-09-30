@@ -69,6 +69,60 @@ def test_weights_that_do_not_fit_the_tokenizer_are_reported(tmp_path):
     assert "requested config" not in message
 
 
+def test_a_checkpoint_from_another_version_names_the_unknown_field(tmp_path):
+    """A checkpoint written before a `Config` field was removed used to raise a
+    bare `TypeError`, which `__main__` does not catch - so the user got a
+    traceback instead of the project's clean one-line error, and `rm -rf data`
+    could not help because the checkpoint is the deliverable."""
+    from mini_transformer.init import init_weights
+    from mini_transformer.model import MiniTransformer
+
+    config = Config()
+    model = MiniTransformer(vocab_size=64, config=config)
+    init_weights(model, config.n_layer)
+    path = tmp_path / "model.pt"
+    torch.save(
+        {
+            "model": model.state_dict(),
+            "step": 1,
+            "config": {**config.__dict__, "eval_interval": 500},
+        },
+        path,
+    )
+
+    with pytest.raises(ValueError) as excinfo:
+        load_checkpoint(path, "cpu", vocab_size=64)
+
+    message = str(excinfo.value)
+    assert "eval_interval" in message
+    assert "written by a different version" in message
+    assert "retrain" in message
+
+
+def test_a_checkpoint_from_another_version_names_the_unknown_field_even_when_a_config_is_passed(tmp_path):
+    """The caller's config skips the `Config(**saved)` line entirely, so the
+    guard has to be in front of the diff loop too - otherwise the unknown key
+    surfaces as `AttributeError: 'Config' object has no attribute ...`."""
+    from mini_transformer.init import init_weights
+    from mini_transformer.model import MiniTransformer
+
+    config = Config()
+    model = MiniTransformer(vocab_size=64, config=config)
+    init_weights(model, config.n_layer)
+    path = tmp_path / "model.pt"
+    torch.save(
+        {
+            "model": model.state_dict(),
+            "step": 1,
+            "config": {**config.__dict__, "eval_interval": 500},
+        },
+        path,
+    )
+
+    with pytest.raises(ValueError, match="eval_interval"):
+        load_checkpoint(path, "cpu", vocab_size=64, config=Config())
+
+
 def test_a_missing_tokenizer_names_the_path_instead_of_a_traceback(tmp_path):
     with pytest.raises(ValueError, match="tokenizer.json not found - run:"):
         main(

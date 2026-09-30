@@ -21,10 +21,21 @@ def load_checkpoint(path, device, vocab_size, config=None):
 
     state = torch.load(path, map_location=device, weights_only=True)
 
-    if config is None:
-        config = Config(**state["config"]) if "config" in state else Config()
-
+    # Checked before *both* uses of `saved` below. Filtering only at the
+    # `Config(**saved)` call would turn this into an AttributeError further down,
+    # because the diff loop still walks the raw dict.
     saved = state.get("config")
+    unknown = set(saved or {}) - Config.__dataclass_fields__.keys()
+    if unknown:
+        raise ValueError(
+            f"{path} was written by a different version "
+            f"({', '.join(sorted(unknown))}) - retrain, or check out the "
+            f"version that wrote it"
+        )
+
+    if config is None:
+        config = Config(**saved) if saved is not None else Config()
+
     if saved is not None:
         differing = {
             key: (saved[key], getattr(config, key))
