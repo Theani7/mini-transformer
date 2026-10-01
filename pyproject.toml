@@ -42,6 +42,7 @@ Issues = "https://github.com/Theani7/mini-transformer/issues"
 [project.scripts]
 mini-transformer = "mini_transformer.generate:cli"
 mini-eval = "mini_transformer.eval:cli"
+mini-summary = "mini_transformer.summary:main"
 
 [build-system]
 requires = ["uv_build>=0.12.13,<0.13.0"]

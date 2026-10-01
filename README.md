@@ -44,7 +44,7 @@ uv run python -m mini_transformer.generate \
 uv run python -m mini_transformer.generate --chat --clean
 
 # 4. Inspect model tensor dimensions, memory footprint & FLOPs:
-uv run python -m mini_transformer.summary \
+uv run mini-summary \
   --checkpoint checkpoints/tinystories.safetensors \
   --tokenizer checkpoints/tinystories_tokenizer.json
 
@@ -52,7 +52,7 @@ uv run python -m mini_transformer.summary \
 uv run mini-eval
 ```
 
-Console scripts `mini-transformer` and `mini-eval` are pre-installed in the virtual environment.
+Console scripts `mini-transformer`, `mini-eval`, and `mini-summary` are pre-installed in the virtual environment.
 
 ---
 

@@ -78,3 +78,25 @@ def test_package_exports_public_api():
     assert hasattr(mini_transformer, "__version__")
     assert mini_transformer.__version__ == "0.2.0"
 
+
+def test_console_scripts_resolve_to_callables():
+    """pyproject.toml script entries must point to importable, callable functions.
+
+    Prevents typos in console script endpoints that would break `uv run <script>`.
+    """
+    import importlib
+    import tomllib
+
+    pyproject_path = Path(__file__).resolve().parent.parent / "pyproject.toml"
+    with open(pyproject_path, "rb") as f:
+        data = tomllib.load(f)
+
+    scripts = data["project"]["scripts"]
+    assert "mini-summary" in scripts
+    for name, target in scripts.items():
+        mod_name, func_name = target.split(":")
+        mod = importlib.import_module(mod_name)
+        assert hasattr(mod, func_name), f"{name} points to missing attribute {target}"
+        assert callable(getattr(mod, func_name)), f"{target} is not callable"
+
+
